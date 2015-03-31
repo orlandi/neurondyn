@@ -20,15 +20,27 @@
 #include "main.h"
 #include "netdyn.h"
 
+#include <stdio.h>
+
 int main(int argc, char *argv[])
 {
+    // Disable buffering
+    setvbuf(stdout, NULL, _IOLBF, 0);
     int i = 1;
-    std::stringstream seedsUsed;
+    std::stringstream seedsUsed, configFile;
     while(i > 0)
     {
         simulation = new NetDyn;
         std::cout << "Running simulation " << i << "...\n";
-        simulation->loadConfigFile("config.cfg", i);
+        if(argc > 1)
+        {
+            configFile << argv[1];
+            std::cout << "Loading Config File: " << configFile.str() << "\n";
+            simulation->loadConfigFile(configFile.str(), i);
+
+        }
+        else
+            simulation->loadConfigFile("config.cfg", i);
         i = simulation->simulationStart();
         seedsUsed << simulation->getOriginalRngSeed() << " ";
         // Bah. Need to avoid the memory hogs

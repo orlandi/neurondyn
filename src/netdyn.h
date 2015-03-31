@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009-2010 Javier G. Orlandi <orlandi@dherkova.com>
+ * Copyright (c) 2009-2013 Javier G. Orlandi <orlandi@dherkova.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -18,6 +18,7 @@
 #define _NETDYN_H_
 
 #include <libconfig.h++>
+#include "gsl/gsl_statistics.h"
 #include "gsl/gsl_rng.h"
 #include "gsl/gsl_randist.h"
 #include <iostream>
@@ -29,6 +30,13 @@ enum neurotransmitterType
     NT_NMDA = 0x02,
     NT_GABA = 0x04
 };
+enum neuronClass
+{
+    NEU_RS = 0x01,
+    NEU_LS = 0x02,
+    NEU_FS = 0x04
+};
+
 #define STD_DATA_COUNT 1000000
 
 class NetDyn
@@ -55,6 +63,7 @@ class NetDyn
 
         void setCUX(std::string filename);
         void setMiniExploration(std::string strengthFile, std::string timeFile);
+        void loadNeuronType(std::string filename);
 
         inline bool simulationIsRunning()
             {return running;}
@@ -74,8 +83,11 @@ class NetDyn
         void saveResults(std::string tmpStr, std::string filename = "");
         void initSaveResults(std::string tmpStr);
 
+        void updateAdaptiveIBI(int st);
+        void calculateAdaptiveIBI();
+
     private:
-        std::string savedFileName;
+        std::string savedFileName,configFileName;
         gsl_rng* rng;			// RNG structure
         gsl_rng** parallelRng;
         libconfig::Config* configFile;
@@ -94,12 +106,12 @@ class NetDyn
         int nType, numTypes;
         // Neuron variables
         double *C, *K, *V_r, *V_t, *V_p, *a, *b, *p;
-        double *v, *u, *I, *I_GABA, *I_AMPA, *I_NMDA, *I_WNOISE, *c, *d, *D, *meanD_AMPA, *meanD_GABA;
+        double *v, *u, *I, *I_GABA, *I_AMPA, *I_NMDA, *I_WNOISE, *c, *d, *D, *meanD_AMPA, *meanD_GABA, *v_d;
         double *positionX, *positionY;
-        int *neurotransmitter;
+        int *neurotransmitter, *neuronalClass;
         int *ntTypes, *neuronType, neuronTypes;
         double g_AMPA, g_NMDA, g_GABA, g_mAMPA, g_mGABA, g_WNOISE;
-        double tau_NMDA, tau_AMPA, tau_GABA, tau_D, beta, tau_MINI, depressionResetInterval;
+        double tau_NMDA, tau_AMPA, tau_GABA, tau_D_AMPA, tau_D_GABA, beta_AMPA, beta_GABA, tau_MINI, depressionResetInterval;
         int totalSpikes;
 
         // Simulation parameters
@@ -108,12 +120,12 @@ class NetDyn
 
         bool GABA, NMDA, AMPA, MINI, WNOISE, depression;
 
-        double exp_AMPA, exp_NMDA, exp_GABA, dt_times_a, dt_over_tau_D, dt_over_C, strength_WNOISE;
+        double exp_AMPA, exp_NMDA, exp_GABA, dt_times_a, dt_over_tau_D_AMPA, dt_over_tau_D_GABA, dt_over_C, strength_WNOISE;
         // Post processing
         int *dSpikeNeuron, dSpikeRecord, dSpikeRecordLimit, *dSpikeStep, dSpikeSubsetSize;
         std::string dSpikesFile, traceFile, dSpikesSubsetFile;
-        std::string resultsFolder;
-        bool tracing;
+        std::string resultsFolder, presetTypesFile;
+        bool tracing, presetTypes;
         int *tracedNeuron, numberTraces, traceSamplingTime, traceRecord;
         double **traceV, **traceU, **traceI, **traceI_AMPA, **traceI_NMDA, **traceI_GABA;
         double **traceI_WNOISE, **traceD, *traceTime, **traceG_AMPA, **traceG_GABA;
@@ -122,7 +134,14 @@ class NetDyn
         char currentPath[FILENAME_MAX];
         int simulationReturnValue;
         int originalRngSeed;
-}; 
+
+        // For the burst adaptation
+        bool adaptiveIBI;
+        double adaptiveTotalTime, adaptiveBin, adaptiveThreshold, *adaptiveSpikeTrace;
+        int adaptiveTotalTimeSteps, adaptiveBinSteps, adaptiveSpikeTraceLength;
+        double adaptiveTargetIBI, adaptiveAccuracy, adaptiveMultiplier;
+        double adaptiveIBIprev, adaptiveStrprev;
+};
 
 #endif
     // _NETDYN_H_

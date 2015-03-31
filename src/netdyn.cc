@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009-2010 Javier G. Orlandi <orlandi@dherkova.com>
+ * Copyright (c) 2009-2013 Javier G. Orlandi <orlandi@dherkova.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -47,7 +47,7 @@ NetDyn::NetDyn()
 void NetDyn::setConnectivity(std::string filename)
 {
     std::ifstream inputFile;
-    std::string line; 
+    std::string line;
     int nFrom, nTo, nNeurons, nConnections, nCurrent;
     int connectionIndex;
     std::stringstream tmpStr;
@@ -198,6 +198,36 @@ void NetDyn::setCUX(std::string filename)
     std::cout << "CUX file loaded.\n";
 }
 
+void NetDyn::loadNeuronType(std::string filename)
+{
+    std::ifstream inputFile;
+    inputFile.open(filename.c_str(), std::ifstream::in);
+    if (!inputFile.is_open())
+    {
+        std::cout << "There was an error opening the neuronType file: " << filename << "\n";
+        std::cout << "Using probabilities instead.\n";
+        return;
+    }
+    std::string line;
+    int nnum, ntyp;
+    std::istringstream tmpStr;
+
+    while(std::getline(inputFile, line))
+    {
+        if(line.at(0) == '%')
+            continue;
+        tmpStr.clear();
+        tmpStr.str(line);
+        tmpStr >> nnum >> ntyp;
+        neuronType[nnum] = ntyp;
+    }
+    std::cout << "neuronType file loaded.\n";
+//    std::cout << "Types: ";
+//    for(int i = 0;i < nNumber; i++)
+//        std::cout << neuronType[i] << " ";
+//    std::cout << "\n";
+
+}
 void NetDyn::setMiniExploration(std::string strengthFile, std::string timeFile)
 {
     std::ifstream inputFile;
@@ -276,9 +306,19 @@ void NetDyn::loadConfigFile(std::string filename, int param)
     int *nt;
     std::string ntString, tmpStr, lookupStr;
     bool tmpbool = false;
-    
+    configFileName = filename;
+
     configFile = new libconfig::Config();
-    configFile->readFile(filename.c_str());
+    try
+    {
+        configFile->readFile(filename.c_str());
+    }
+    catch(libconfig::FileIOException &e)
+    {
+        std::cout << "Main error.Config file could not be loaded.\n";
+        exit(1);
+    }
+
     configFile->setAutoConvert(true);
 
     // Start setting the connectivity
@@ -319,6 +359,7 @@ void NetDyn::loadConfigFile(std::string filename, int param)
     p = new double[neuronTypes];
     nt = new int[neuronTypes];
     neurotransmitter = new int[neuronTypes];
+    neuronalClass = new int[neuronTypes];
     for(int i = 0; i < neuronTypes; i ++)
     {
         typelist[i].lookupValue("a", a[i]);
@@ -336,14 +377,25 @@ void NetDyn::loadConfigFile(std::string filename, int param)
 
         nt[i] = 0;
         if(ntString.find("AMPA") != std::string::npos)
-            nt[i] = nt[i] | NT_AMPA;    
+            nt[i] = nt[i] | NT_AMPA;
         if(ntString.find("NMDA") != std::string::npos)
             nt[i] = nt[i] | NT_NMDA;
         if(ntString.find("GABA") != std::string::npos)
             nt[i] = nt[i] | NT_GABA;
 //            std::cout << C[i] << " " << c[i] << " " << K[i] << " " << nt[i] << "\n";
         neurotransmitter[i] = nt[i];
+
+
+        typelist[i].lookupValue("class", tmpStr);
+        neuronalClass[i] = NEU_RS;
+        if(tmpStr.find("RS") != std::string::npos)
+            neuronalClass[i] = NEU_RS;
+        else if(tmpStr.find("LS") != std::string::npos)
+            neuronalClass[i] = NEU_LS;
+        else if(tmpStr.find("FS") != std::string::npos)
+            neuronalClass[i] = NEU_FS;
     }
+
         // Configure remaining parameters
         if(!configFile->lookupValue("simulation.timestep", dt))
             std::cout << "Warning! Missing timestep\n";
@@ -406,10 +458,14 @@ void NetDyn::loadConfigFile(std::string filename, int param)
             std::cout << "Warning! depression not defined\n";
         else if((depression))
         {
-            if(!configFile->lookupValue("neuron.synapse.depression.beta", beta))
-                std::cout << "Warning! beta not defined\n";
-            if(!configFile->lookupValue("neuron.synapse.depression.tau", tau_D))
-                std::cout << "Warning! tau_D not defined\n";
+            if(!configFile->lookupValue("neuron.synapse.depression.beta_AMPA", beta_AMPA))
+                std::cout << "Warning! beta_AMPA not defined\n";
+            if(!configFile->lookupValue("neuron.synapse.depression.tau_AMPA", tau_D_AMPA))
+                std::cout << "Warning! tau_D_AMPA not defined\n";
+            if(!configFile->lookupValue("neuron.synapse.depression.beta_GABA", beta_GABA))
+                std::cout << "Warning! beta_GABA not defined\n";
+            if(!configFile->lookupValue("neuron.synapse.depression.tau_GABA", tau_D_GABA))
+                std::cout << "Warning! tau_D_GABA not defined\n";
         }
      
         // Configure CUX
@@ -426,6 +482,20 @@ void NetDyn::loadConfigFile(std::string filename, int param)
                 std::cout << "Warning! neuron.CUX.file not defined\n";
         }
 
+        // Configure Preset types
+        if(!configFile->lookupValue("neuron.presetTypes.active", presetTypes))
+        {
+            std::cout << "Warning! neuron.presetTypes.active not defined\n";
+            presetTypes = false;
+        }
+        if(presetTypes)
+        {
+            if(!configFile->lookupValue("neuron.presetTypes.file", presetTypesFile))
+            {
+                presetTypes = false;
+                std::cout << "Warning! neuron.presetTypes.file not defined\n";
+            }
+        }
         // Configure the protocols
         // Depression_reset
         if(!configFile->lookupValue("protocols.depression_reset.active", depressionReset))
@@ -452,6 +522,27 @@ void NetDyn::loadConfigFile(std::string filename, int param)
                 std::cout << "Warning! protocols.mini_exploration.time_file not defined\n";
         }
 
+        // adaptive_IBI
+        if(!configFile->lookupValue("protocols.adaptive_IBI.active", adaptiveIBI))
+        {
+            std::cout << "Warning! protocols.adaptive_IBI.active not defined\n";
+            adaptiveIBI = false;
+        }
+        if(adaptiveIBI)
+        {
+            if(!configFile->lookupValue("protocols.adaptive_IBI.adaptation_time", adaptiveTotalTime))
+                std::cout << "Warning! protocols.adaptive_IBI.adaptation_time not defined\n";
+            if(!configFile->lookupValue("protocols.adaptive_IBI.bin_size", adaptiveBin))
+                std::cout << "Warning! protocols.adaptive_IBI.bin_size not defined\n";
+            if(!configFile->lookupValue("protocols.adaptive_IBI.threshold", adaptiveThreshold))
+                std::cout << "Warning! protocols.adaptive_IBI.threshold not defined\n";
+            if(!configFile->lookupValue("protocols.adaptive_IBI.target_IBI", adaptiveTargetIBI))
+                std::cout << "Warning! protocols.adaptive_IBI.target_IBI not defined\n";
+            if(!configFile->lookupValue("protocols.adaptive_IBI.accuracy", adaptiveAccuracy))
+                std::cout << "Warning! protocols.adaptive_IBI.accuracy not defined\n";
+            if(!configFile->lookupValue("protocols.adaptive_IBI.multiplier", adaptiveMultiplier))
+                std::cout << "Warning! protocols.adaptive_IBI.multiplier not defined\n";
+        }
 
         // Initialize the rest
         seedRng();
@@ -523,6 +614,8 @@ void NetDyn::loadConfigFile(std::string filename, int param)
             v = new double[nNumber];
             u = new double[nNumber];
             I = new double[nNumber];
+            v_d = new double[nNumber];
+
             neuronType = new int[nNumber];
 
             if(AMPA)
@@ -561,15 +654,22 @@ void NetDyn::loadConfigFile(std::string filename, int param)
 
             // Preallocate to define the neuron types
             gsl_ran_discrete_t *randist;
-            randist =  gsl_ran_discrete_preproc (neuronTypes, p);
+            randist =  gsl_ran_discrete_preproc(neuronTypes, p);
+
+            // PRELOAD neurontype in here
+            if(presetTypes)
+            {
+                loadNeuronType(presetTypesFile);
+            }
 
             for(int i = 0; i < nNumber; i++)
             {
                 u[i] = 0.;
                 I[i] = 0.;
 
-                // Assign the neuron type from the type distribution 
-                neuronType[i] = gsl_ran_discrete (rng, randist);
+                // Assign the neuron type from the type distribution
+                if(!presetTypes)
+                    neuronType[i] = gsl_ran_discrete(rng, randist);
 
                 // Override neuronal type if CUX is overexpressed
                 if(CUXactive)
@@ -578,6 +678,7 @@ void NetDyn::loadConfigFile(std::string filename, int param)
 
 
                 v[i] = V_r[neuronType[i]];
+                v_d[i] = v[i];
 
 
                 if(AMPA)
@@ -619,6 +720,18 @@ void NetDyn::loadConfigFile(std::string filename, int param)
             simulationSteps = ceil(totalTime/dt);
             step = 0;
             totalSpikes = 0;
+
+
+            if(adaptiveIBI)
+            {
+                adaptiveBinSteps = int(adaptiveBin/dt);
+                adaptiveTotalTimeSteps = int(adaptiveTotalTime/dt);
+                adaptiveSpikeTraceLength = adaptiveTotalTimeSteps/adaptiveBinSteps;
+                adaptiveSpikeTrace = new double[adaptiveSpikeTraceLength];
+                for(int i = 0; i < adaptiveSpikeTraceLength; i++)
+                    adaptiveSpikeTrace[i] = 0;
+                adaptiveIBIprev = 0.;
+            }
     }
 
     void NetDyn::saveNetworkStructure(std::string filename)
@@ -703,11 +816,22 @@ void NetDyn::loadConfigFile(std::string filename, int param)
                 }
                 // Neurotransmitter depletion
                 if(depression)
-                    D[i] *= beta;
+                {
+                    if((neurotransmitter[ntype] & NT_AMPA) && AMPA)
+                        D[i] *= beta_AMPA;
+                    if((neurotransmitter[ntype] & NT_GABA) && GABA)
+                        D[i] *= beta_GABA;
+                }
     //            std::cout << D[i]<< "\n";
                 // Add the spike to the list
-                recordSpike(i, step);
-                totalSpikes++;
+
+                if(adaptiveIBI)
+                    updateAdaptiveIBI(step);
+                else
+                {
+                    recordSpike(i, step);
+                    totalSpikes++;
+                }
             }
             // Update the mean depression: assign to each neuron a mean depression of its input connections
             if(depression && depressionMini)
@@ -834,12 +958,40 @@ void NetDyn::loadConfigFile(std::string filename, int param)
             I_GABA[i] *= exp_GABA;
         }
         // Now it is time to update the soma - Euler for now
-        vtmp = v[i]+dt/C[ntype]*(K[ntype]*(v[i]-V_r[ntype])*(v[i]-V_t[ntype])-u[i]+I[i]);
-        u[i] += dt*a[ntype]*(b[ntype]*(v[i]-V_r[ntype])-u[i]);
+
+        // Update the membrane potential
+        if(neuronalClass[ntype] & (NEU_RS | NEU_FS))
+            vtmp = v[i]+dt/C[ntype]*(K[ntype]*(v[i]-V_r[ntype])*(v[i]-V_t[ntype])-u[i]+I[i]);
+        // Here there's a dendtric compartment
+        else if(neuronalClass[ntype] & NEU_LS)
+        {
+            vtmp = v[i]+dt/C[ntype]*(K[ntype]*(v[i]-V_r[ntype])*(v[i]-V_t[ntype])+1.2*(v_d[i]-v[i])-u[i]+I[i]);
+            v_d[i] = v_d[i]+0.01*dt*(v[i]-v_d[i]);
+        }
+        // Update the slow variable
+        if(neuronalClass[ntype] & (NEU_RS | NEU_LS))
+            u[i] += dt*a[ntype]*(b[ntype]*(v[i]-V_r[ntype])-u[i]);
+        else if(neuronalClass[ntype] & NEU_FS)
+        {
+            if(v[i] < V_r[ntype])
+                u[i] += -dt*a[ntype]*u[i];
+            else
+                u[i] += dt*a[ntype]*(b[ntype]*(v[i]-V_r[ntype])*(v[i]-V_r[ntype])*(v[i]-V_r[ntype])-u[i]);
+        }
+/*        if(i < 10)
+        {
+            std::cout << i << " " << neuronalClass[ntype] << " " << (neuronalClass[ntype] & (NEU_RS | NEU_FS)) << "\n";
+            std::cout << i << " " << neuronalClass[ntype] << " " << (neuronalClass[ntype] & (NEU_FS | NEU_LS)) << "\n";
+        }*/
         v[i] = vtmp;
 
         if(depression)
-            D[i] += dt_over_tau_D*(1.-D[i]);
+        {
+            if((neurotransmitter[ntype] & NT_AMPA) && AMPA)
+                D[i] += dt_over_tau_D_AMPA*(1.-D[i]);
+            if((neurotransmitter[ntype] & NT_GABA) && GABA)
+                D[i] += dt_over_tau_D_GABA*(1.-D[i]);
+        }
     }
 
         // DepressionReset protocol
@@ -856,6 +1008,13 @@ void NetDyn::loadConfigFile(std::string filename, int param)
     step++;
     if(step % int(10000/dt) == 0)
         processSpikes(dSpikeRecord);
+
+    if(adaptiveIBI)
+        if((step % adaptiveTotalTimeSteps) == 0)
+        {
+            std::cout << step << " " << adaptiveTotalTimeSteps << "\n";
+            calculateAdaptiveIBI();
+        }
     if(step >= simulationSteps)
         return 0;
     else
@@ -871,7 +1030,10 @@ void NetDyn::setConstants()
     if(GABA)
         exp_GABA = exp(-dt/tau_GABA);
     if(depression)
-        dt_over_tau_D = dt/tau_D;
+    {
+        dt_over_tau_D_AMPA = dt/tau_D_AMPA;
+        dt_over_tau_D_GABA = dt/tau_D_GABA;
+    }
     if(WNOISE)
         strength_WNOISE = sqrt(2.*g_WNOISE/dt);
 }
@@ -930,9 +1092,11 @@ bool NetDyn::seedRng()
     getcwd(currentPath, FILENAME_MAX);
     strcpy(tmpChar, "cp ");
     strcat(tmpChar, currentPath);
-    strcat(tmpChar, "/config.cfg ");
+    strcat(tmpChar, "/");
+    strcat(tmpChar, configFileName.c_str());
+    strcat(tmpChar, " ");
     strcat(tmpChar, newPath);
-    strcat(tmpChar, "config.cfg");
+    strcat(tmpChar, configFileName.c_str());
     system(tmpChar);
 
     // Change to the new working directory
@@ -940,7 +1104,10 @@ bool NetDyn::seedRng()
     strcat(newPath,"/");
     strcat(newPath,seedChar);
     if(chdir(newPath) == -1)
+    {
         std::cerr << "warning: " << strerror(errno) << std::endl;
+        std::cerr << newPath << std::endl;
+    }
     initSaveResults(tmpStr.str());
     return true;
 }
@@ -1044,6 +1211,117 @@ void NetDyn::recordSpike(int i, int st)
     {
         processSpikes();
     }
+}
+
+void NetDyn::updateAdaptiveIBI(int st)
+{
+    int pos = int(st/adaptiveBinSteps) % adaptiveSpikeTraceLength;
+    adaptiveSpikeTrace[pos] += 1;
+}
+
+void NetDyn::calculateAdaptiveIBI()
+{
+    bool insideBurst;
+    double meanSpikes, stdSpikes;
+    int nBursts = 0;
+    double firstBurstPosition, lastBurstPosition, IBI;
+
+    std::cout << "Spikes per bin: \n";
+    for(int i = 0; i < adaptiveSpikeTraceLength; i++)
+        std::cout << adaptiveSpikeTrace[i] << " ";
+    std::cout << "\n";
+
+    // Now calculate the IBI
+    meanSpikes = gsl_stats_mean(adaptiveSpikeTrace, 1, adaptiveSpikeTraceLength);
+    stdSpikes = gsl_stats_sd(adaptiveSpikeTrace, 1, adaptiveSpikeTraceLength);
+    // Old method
+    insideBurst = false;
+    /*for(int i = 0; i < adaptiveSpikeTraceLength; i++)
+    {
+        if(!insideBurst && adaptiveSpikeTrace[i] > meanSpikes+adaptiveThreshold*stdSpikes)
+        {
+            insideBurst = true;
+            nBursts += 1;
+            if(nBursts == 1)
+                firstBurstPosition = i;
+            lastBurstPosition = i;
+        }
+        if(adaptiveSpikeTrace[i] < meanSpikes+adaptiveThreshold*stdSpikes)
+            insideBurst = false;
+    }*/
+    // New method
+    double burstSpikes;
+    for(int i = 0; i < adaptiveSpikeTraceLength; i++)
+    {
+        if(!insideBurst && adaptiveSpikeTrace[i] > meanSpikes+adaptiveThreshold*stdSpikes)
+        {
+            insideBurst = true;
+            burstSpikes = adaptiveSpikeTrace[i];
+        }
+        if(insideBurst && adaptiveSpikeTrace[i] <= meanSpikes+adaptiveThreshold*stdSpikes)
+        {
+            insideBurst = false;
+            if(burstSpikes > 1.*nNumber) // Weird
+            {
+                nBursts += 1;
+                if(nBursts == 1)
+                    firstBurstPosition = i;
+                lastBurstPosition = i;
+            }
+        }
+        else if(insideBurst)
+        {
+            burstSpikes += adaptiveSpikeTrace[i];
+        }
+    }
+    if(nBursts > 1)
+        IBI = (lastBurstPosition-firstBurstPosition)*adaptiveBin/double(nBursts-1)/1e3;
+    else
+        IBI = 0.;
+
+    std::cout << "IBI: " << IBI << "s (" << nBursts << ") bursts.\n";
+
+    if(fabs(IBI-adaptiveTargetIBI) < adaptiveAccuracy)
+    {
+        std::cout << "IBI target reached. Starting the simulation now... g_AMPA: " << g_AMPA << "\n";
+        // We can start the real simulation
+        adaptiveIBI = false;
+        step = 0;
+    }
+    else
+    {
+        // Now is when we need to check
+        if(adaptiveIBIprev <= 0.1 || IBI <= 0.1)
+        {
+            adaptiveStrprev = g_AMPA;
+            adaptiveIBIprev = IBI;
+
+            if(IBI > adaptiveTargetIBI || IBI <= 0.1)
+                g_AMPA *= (1+adaptiveMultiplier);
+            else
+               g_AMPA *= (1-adaptiveMultiplier);
+        }
+        else
+        {
+            std::cout << "G old now guess: " << adaptiveStrprev << " " << g_AMPA << " " <<
+                (adaptiveTargetIBI-adaptiveIBIprev)*(g_AMPA-adaptiveStrprev)/(IBI-adaptiveIBIprev)+adaptiveStrprev << "\n";
+            std::cout << "IBIs: " << adaptiveIBIprev << " " << IBI << "\n";
+
+            g_AMPA = (adaptiveTargetIBI-adaptiveIBIprev)*(g_AMPA-adaptiveStrprev)/(IBI-adaptiveIBIprev)+adaptiveStrprev;
+            adaptiveIBIprev = IBI;
+        }
+        std::cout << "Updated g_AMPA: " << g_AMPA << "\n";
+    }
+    if(GABA)
+        g_GABA = -2.*g_AMPA;
+    if(g_AMPA < 0.)
+    {
+        std::cout << "Something went wrong... g_AMPA < 0. Aborting.\n";
+        exit(1);
+    }
+    // Now we reset the vector
+    for(int i = 0; i < adaptiveSpikeTraceLength; i++)
+        adaptiveSpikeTrace[i] = 0;
 }
 
 void NetDyn::processSpikes(int size)

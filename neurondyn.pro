@@ -3,12 +3,13 @@
 ######################################################################
 
 TEMPLATE = app
-TARGET = 
+TARGET =
 DEPENDPATH += . src
-INCLUDEPATH += . src /opt/local/include/eigen2 /usr/include/eigen2 /opt/local/include /opt/local/include/QtGui /opt/local/include/QtCore /usr/include/qt4 /usr/include/qt4/QtCore /usr/include/qt4/QtGui
-LIBS += -L/opt/local/lib -lgsl -lgslcblas -fopenmp -lconfig++ -lQtGui -lQtCore
+INCLUDEPATH += . src /usr/include/eigen3
+#LIBS += -L/opt/local/lib -lgsl -lgslcblas -fopenmp -lconfig++ -lQtGui -lQtCore
+LIBS += -L/usr/local/lib -lgsl -lgslcblas -fopenmp -lconfig++
 QMAKE_CXXFLAGS += -fopenmp
-CONFIG = console
+CONFIG = console qt
 #CONFIG += debug
 #QMAKE_CXXFLAGS_DEBUG += -pg
 #QMAKE_LFLAGS_DEBUG += -pg
