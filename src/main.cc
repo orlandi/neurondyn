@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009-2010 Javier G. Orlandi <orlandi@dherkova.com>
+ * Copyright (c) 2009-2015 Javier G. Orlandi <javierorlandi@javierorlandi.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -14,40 +14,40 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <QApplication>
-#include <iostream>
-#include <sstream>
 #include "main.h"
 #include "netdyn.h"
 
+#include <cassert>
+#include <limits>
+#include <iostream>
+#include <sstream>
 #include <stdio.h>
-
-int main(int argc, char *argv[])
+ 
+int main(int argc, char* argv[])
 {
-    // Disable buffering
-    setvbuf(stdout, NULL, _IOLBF, 0);
-    int i = 1;
-    std::stringstream seedsUsed, configFile;
-    while(i > 0)
+  static_assert(std::numeric_limits<float>::is_iec559, "IEEE 754 required");
+  // Disable buffering
+  setvbuf(stdout, NULL, _IOLBF, 0);
+  int i = 1;
+  std::stringstream seedsUsed, configFile;
+  while (i > 0)
+  {
+    simulation = new NetDyn;
+    std::cout << "Running simulation " << i << "...\n";
+    if (argc > 1)
     {
-        simulation = new NetDyn;
-        std::cout << "Running simulation " << i << "...\n";
-        if(argc > 1)
-        {
-            configFile << argv[1];
-            std::cout << "Loading Config File: " << configFile.str() << "\n";
-            simulation->loadConfigFile(configFile.str(), i);
-
-        }
-        else
-            simulation->loadConfigFile("config.cfg", i);
-        i = simulation->simulationStart();
-        seedsUsed << simulation->getOriginalRngSeed() << " ";
-        // Bah. Need to avoid the memory hogs
-//        delete[] simulation;
+      configFile << argv[1];
+      std::cout << "Loading Config File: " << configFile.str() << "\n";
+      simulation->loadConfigFile(configFile.str(), i);
     }
-    std::cout << "List of simulation seeds:\n" << seedsUsed.str() << "\n";
+    else
+      simulation->loadConfigFile("config.cfg", i);
+    i = simulation->simulationStart();
+    seedsUsed << simulation->getOriginalRngSeed() << " ";
+    // Bah. Need to avoid the memory hogs
+    //        delete[] simulation;
+  }
+  std::cout << "List of simulation seeds:\n" << seedsUsed.str() << "\n";
 
-    return 0;
+  return 0;
 }
-

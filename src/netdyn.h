@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009-2013 Javier G. Orlandi <orlandi@dherkova.com>
+ * Copyright (c) 2009-2015 Javier G. Orlandi <javierorlandi@javierorlandi.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -14,135 +14,149 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#ifndef _NETDYN_H_
-#define _NETDYN_H_
+#pragma once
 
+#include "circularvector.h"
+#include "adaptationrunner.h"
 #include <libconfig.h++>
 #include "gsl/gsl_statistics.h"
 #include "gsl/gsl_rng.h"
 #include "gsl/gsl_randist.h"
+#include <math.h>
 #include <iostream>
-
+#include <vector>
 
 enum neurotransmitterType
 {
-    NT_AMPA = 0x01,
-    NT_NMDA = 0x02,
-    NT_GABA = 0x04
+  NT_AMPA = 0x01,
+  NT_NMDA = 0x02,
+  NT_GABA = 0x04
 };
 enum neuronClass
 {
-    NEU_RS = 0x01,
-    NEU_LS = 0x02,
-    NEU_FS = 0x04
+  NEU_RS = 0x01,
+  NEU_LS = 0x02,
+  NEU_FS = 0x04
 };
 
 #define STD_DATA_COUNT 1000000
 
 class NetDyn
 {
-	public:
-        NetDyn();
-        void setConnectivity(std::string filename);
-        void printConnectivityMap();
-        void configureNeuron();
-        void configureNeuronTypes(double* cs, double* ds, double* ps, int* ts, int num);
-        void setDefaultNeuronTypes();
-        void configureSimulation();
-        void loadConfigFile(std::string filename, int param = 0);
-        void recordSpike(int i, int st);
-        void configureSpikeRecord(int maxsize = STD_DATA_COUNT, std::string filename = "SpikeRecord.txt", double subset = 0.05);
-        void configureTraces(int num, std::string filename, double sampTime = 1);
-        void processSpikes(int size = -1);
-        void recordTraces();
-        void processTraces(int size = -1);
-        bool seedRng();
-        bool seedParallelRng(int seeds);
-        int simulationStart();
-        bool simulationRun();
+  public:
+  NetDyn();
+  void setConnectivity(std::string filename);
+  void printConnectivityMap();
+  void configureNeuron();
+  void configureNeuronTypes(double* cs, double* ds, double* ps, int* ts, int num);
+  void setDefaultNeuronTypes();
+  void configureSimulation();
+  void loadConfigFile(std::string filename, int param = 0);
+  template <typename T>
+  bool assignConfigValue(const char* entry, T& configVariable, bool critical = true);
+  void recordSpike(int i, int st);
+  void configureSpikeRecord(int maxsize = STD_DATA_COUNT, std::string filename = "SpikeRecord.txt", double subset = 0.05);
+  void configureTraces(int num, std::string filename, double sampTime = 1);
+  void processSpikes(int size = -1);
+  void recordTraces();
+  void processTraces(int size = -1);
+  bool seedRng();
+  bool seedParallelRng(int seeds);
+  int simulationStart();
+  bool simulationRun();
+  void loadNeuronType(std::string filename);
 
-        void setCUX(std::string filename);
-        void setMiniExploration(std::string strengthFile, std::string timeFile);
-        void loadNeuronType(std::string filename);
+  inline bool simulationIsRunning() { return running; }
+  inline bool simulationIsActive() { return active; }
+  inline int getOriginalRngSeed() { return originalRngSeed; }
 
-        inline bool simulationIsRunning()
-            {return running;}
-        inline bool simulationIsActive()
-            {return active;}
-        inline int getOriginalRngSeed()
-            {return originalRngSeed;}
-        int simulationStep();
+  int simulationStep();
 
-        void simulationFinish();
+  void simulationFinish();
 
-        void initialize();
-        void setConstants();
-        void setExternalConnections(std::string filename);
-        void setPositions(std::string filename);
-        void saveNetworkStructure(std::string filename = "NetworkStructure.txt");
-        void saveResults(std::string tmpStr, std::string filename = "");
-        void initSaveResults(std::string tmpStr);
+  void initialize();
+  void setConstants();
+  void setExternalConnections(std::string filename);
+  void setPositions(std::string filename);
+  void saveNetworkStructure(std::string filename = "NetworkStructure.txt");
+  void initSaveResults(std::string tmpStr, std::string filename = "");
+  void saveResults(std::string tmpStr, std::string filename = "");
 
-        void updateAdaptiveIBI(int st);
-        void calculateAdaptiveIBI();
+  bool burstCheck();
 
-    private:
-        std::string savedFileName,configFileName;
-        gsl_rng* rng;			// RNG structure
-        gsl_rng** parallelRng;
-        libconfig::Config* configFile;
+  // void updateAdaptiveIBI(int st);
+  // void calculateAdaptiveIBI();
 
-        bool running, active, parallel, multiplicativeMini, depressionMini;
-        bool CUXactive, *CUXoverexpressed, depressionReset, miniExplorationActive;
-        int CUXmodel;
-        std::string CUXfile, miniExplorationStrengthFile, miniExplorationTimeFile;
-        double *miniStrength, *miniTime;
+  private:
+  std::string savedFileName, configFileName;
+  gsl_rng* rng; // RNG structure
+  gsl_rng** parallelRng;
+  libconfig::Config* configFile;
 
-        int *connectivityMap;
-        int *connectivityNumber;
-        int *inputConnectivityNumber, *numberExcitatoryInputs, *numberInhibitoryInputs;
-        int *connectivityFirstIndex;
-        int nNumber, totalConnections;
-        int nType, numTypes;
-        // Neuron variables
-        double *C, *K, *V_r, *V_t, *V_p, *a, *b, *p;
-        double *v, *u, *I, *I_GABA, *I_AMPA, *I_NMDA, *I_WNOISE, *c, *d, *D, *meanD_AMPA, *meanD_GABA, *v_d;
-        double *positionX, *positionY;
-        int *neurotransmitter, *neuronalClass;
-        int *ntTypes, *neuronType, neuronTypes;
-        double g_AMPA, g_NMDA, g_GABA, g_mAMPA, g_mGABA, g_WNOISE;
-        double tau_NMDA, tau_AMPA, tau_GABA, tau_D_AMPA, tau_D_GABA, beta_AMPA, beta_GABA, tau_MINI, depressionResetInterval;
-        int totalSpikes;
+  bool running, active, parallel, multiplicativeMini, depressionMini;
+  double* miniStrength, *miniTime;
 
-        // Simulation parameters
-        double dt, t, totalTime;
-        int  simulationSteps, step;
+  int* connectivityMap;
+  int* connectivityNumber;
+  int* inputConnectivityNumber, *numberExcitatoryInputs, *numberInhibitoryInputs;
+  int* connectivityFirstIndex;
+  int nNumber, totalConnections;
+  int nType, numTypes;
+  // Neuron variables
+  double* C, *K, *V_r, *V_t, *V_p, *a, *b, *p;
+  double* v, *u, *I, *I_GABA, *I_AMPA, *I_NMDA, *I_WNOISE, *c, *d, *D, *meanD_AMPA, *meanD_GABA, *v_d;
+  double* positionX, *positionY;
+  int* neurotransmitter, *neuronalClass;
+  int* ntTypes, *neuronType, neuronTypes;
+  double g_AMPA, g_NMDA, g_GABA, g_mAMPA, g_mGABA, g_WNOISE;
+  double tau_NMDA, tau_AMPA, tau_GABA, tau_D_AMPA, tau_D_GABA, beta_AMPA, beta_GABA, tau_MINI;
+  int totalSpikes;
 
-        bool GABA, NMDA, AMPA, MINI, WNOISE, depression;
+  // Simulation parameters
+  double dt, t, totalTime;
+  int simulationSteps, step;
 
-        double exp_AMPA, exp_NMDA, exp_GABA, dt_times_a, dt_over_tau_D_AMPA, dt_over_tau_D_GABA, dt_over_C, strength_WNOISE;
-        // Post processing
-        int *dSpikeNeuron, dSpikeRecord, dSpikeRecordLimit, *dSpikeStep, dSpikeSubsetSize;
-        std::string dSpikesFile, traceFile, dSpikesSubsetFile;
-        std::string resultsFolder, presetTypesFile;
-        bool tracing, presetTypes;
-        int *tracedNeuron, numberTraces, traceSamplingTime, traceRecord;
-        double **traceV, **traceU, **traceI, **traceI_AMPA, **traceI_NMDA, **traceI_GABA;
-        double **traceI_WNOISE, **traceD, *traceTime, **traceG_AMPA, **traceG_GABA;
-        int *parallelThreadUsage;
+  bool GABA, NMDA, AMPA, MINI, WNOISE, depression;
 
-        char currentPath[FILENAME_MAX];
-        int simulationReturnValue;
-        int originalRngSeed;
+  double exp_AMPA, exp_NMDA, exp_GABA, dt_times_a, dt_over_tau_D_AMPA, dt_over_tau_D_GABA, dt_over_C, strength_WNOISE;
+  // Post processing
+  int* dSpikeNeuron, dSpikeRecord, dSpikeRecordLimit, *dSpikeStep, dSpikeSubsetSize;
+  std::string dSpikesFile, traceFile, dSpikesSubsetFile;
+  std::string resultsFolder, presetTypesFile;
+  bool tracing, presetTypes;
+  int* tracedNeuron, numberTraces, traceSamplingTime, traceRecord;
+  double** traceV, **traceU, **traceI, **traceI_AMPA, **traceI_NMDA, **traceI_GABA;
+  double** traceI_WNOISE, **traceD, *traceTime, **traceG_AMPA, **traceG_GABA;
+  int* parallelThreadUsage;
 
-        // For the burst adaptation
-        bool adaptiveIBI;
-        double adaptiveTotalTime, adaptiveBin, adaptiveThreshold, *adaptiveSpikeTrace;
-        int adaptiveTotalTimeSteps, adaptiveBinSteps, adaptiveSpikeTraceLength;
-        double adaptiveTargetIBI, adaptiveAccuracy, adaptiveMultiplier;
-        double adaptiveIBIprev, adaptiveStrprev;
+  char currentPath[FILENAME_MAX];
+  int simulationReturnValue;
+  int originalRngSeed;
+
+  // Burst detector parameters
+  bool burstDetector;
+  double burstDetectorBinSize, burstDetectorMinimumSpikesPerNeuron;
+  int burstDetectorBinNumber, burstDetectorStepsPerBin;
+  int burstDetectorFirstStepAboveThreshold, burstDetectorLastStepAboveThreshold;
+  double burstDetectorSpikeCount;
+  bool burstDetectorPossibleBurst;
+  std::string burstDetectorSavedFileName;
+
+  // Burst detector variables
+  circularVector* burstDetectorMemory;
+  std::vector<double> burstDetectorStorage;
+  // Missing burst history variable
+
+  // Burst adaptation parameters
+  bool adaptiveIBI;
+  double adaptiveIBItotalTime;
+  double adaptiveIBItarget, adaptiveIBIaccuracy, adaptiveIBIbaseMultiplier, adaptiveIBIextrapolationMultiplier;
+  double adaptiveIBIweightLowerBound, adaptiveIBIweightUpperBound;
+  int adaptiveIBImaxIterations;
+  // Burst adaptation internal variables
+  adaptationRunner* adaptiveIBIrunner;
+  int adaptiveIBIcurrentIteration, adaptiveIBItotalTimeSteps;
+  bool adaptiveIBIfinished;
+
+  bool dryRun;
 };
-
-#endif
-    // _NETDYN_H_
-

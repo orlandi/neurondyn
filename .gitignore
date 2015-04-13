@@ -1,0 +1,24 @@
+# Compiled source #
+###################
+*.o
+*.so
+Makefile
+
+# Executables #
+##############
+neurondyn
+batch.py
+
+# System files #
+###############
+.DS_Store
+.tags*
+
+# Other #
+########
+src/.deps*
+config/*
+autom4te*.cache
+.deps
+neurondyn.sublime*
+

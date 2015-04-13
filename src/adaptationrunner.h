@@ -16,6 +16,19 @@
 
 #pragma once
 
-#include "netdyn.h"
+class adaptationRunner
+{
+  public:
+  adaptationRunner();
+  adaptationRunner(double baseMult, double extrMult, bool slop, bool verb = true);
+  void initialize();
+  void setLowerBound(double bound);
+  void setUpperBound(double bound);
+  void addDataPair(double x, double y);
+  double getPrediction(double x);
 
-NetDyn* simulation;
+  private:
+  double x1, x2, y1, y2, yLowerBound, yUpperBound;
+  double baseMultiplier, extrapolationMultiplier;
+  bool slopePositive, verbose;
+};
