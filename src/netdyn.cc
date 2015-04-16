@@ -44,6 +44,7 @@ NetDyn::NetDyn()
   presetTypes = false;
   burstDetector = false;
   adaptiveIBI = false;
+  burstTransitionExploration = false;
   dryRun = false;
   WNOISE = false;
   AMPA = false;
@@ -51,7 +52,6 @@ NetDyn::NetDyn()
   GABA = false;
   MINI = false;
   depression = false;
-  burstDetectorSavedFileName = "bursts.txt";
   simulationReturnValue = 0;
 
   resultsFolder = "data";
@@ -69,7 +69,7 @@ void NetDyn::setConnectivity(std::string filename)
   inputFile.open(filename.c_str(), std::ifstream::in);
   if (!inputFile.is_open())
   {
-    std::cout << "There was an error opening the file " << filename << "\n";
+    std::cerr << "There was an error opening the file " << filename << "\n";
     exit(1);
     return;
   }
@@ -147,9 +147,10 @@ int NetDyn::simulationStart()
 
   time_t tstart, tend;
   tstart = time(0);
-
-  while (simulationStep())
-  {
+  bool done = false;
+  while(!done)
+  { 
+      done = simulationStep();
   }
   std::cout << "Simulation finished!\n";
   tend = time(0);
@@ -193,8 +194,8 @@ void NetDyn::loadNeuronType(std::string filename)
   inputFile.open(filename.c_str(), std::ifstream::in);
   if (!inputFile.is_open())
   {
-    std::cout << "There was an error opening the neuronType file: " << filename << "\n";
-    std::cout << "Using probabilities instead.\n";
+    std::cerr << "There was an error opening the neuronType file: " << filename << "\n";
+    std::cerr << "Using probabilities instead.\n";
     return;
   }
   std::string line;
@@ -223,8 +224,8 @@ void NetDyn::setPositions(std::string filename)
   inputFile.open(filename.c_str(), std::ifstream::in);
   if (!inputFile.is_open())
   {
-    std::cout << "There was an error opening the file " << filename << "\n";
-    return;
+    std::cerr << "There was an error opening the file " << filename << "\n";
+    exit(1);
   }
   std::string line, nNum, posX, posY;
   int nnum;
@@ -256,7 +257,7 @@ void NetDyn::loadConfigFile(std::string filename, int param)
   }
   catch (libconfig::FileIOException& e)
   {
-    std::cout << "Main error. Config file could not be loaded.\n";
+    std::cerr << "Main error. Config file could not be loaded.\n";
     exit(1);
   }
 
@@ -270,8 +271,7 @@ void NetDyn::loadConfigFile(std::string filename, int param)
   assignConfigValue("positions.file", tmpStr);
   setPositions(tmpStr);
 
-  assignConfigValue("results.path", tmpStr, false);
-
+  assignConfigValue("results.path", resultsFolder, false);
 
   // Configure neuron models TODO: error checking for this part
   libconfig::Setting& typelist = configFile->lookup("neuron.models");
@@ -390,12 +390,18 @@ void NetDyn::loadConfigFile(std::string filename, int param)
     assignConfigValue("protocols.burst_detector.bin_size", burstDetectorBinSize);
     assignConfigValue("protocols.burst_detector.bin_number", burstDetectorBinNumber);
     assignConfigValue("protocols.burst_detector.minimum_spikes_per_neuron", burstDetectorMinimumSpikesPerNeuron);
+    assignConfigValue("protocols.burst_detector.file", burstDetectorFile);
   }
 
   // adaptive_IBI
   assignConfigValue("protocols.adaptive_IBI.active", adaptiveIBI, false);
   if (adaptiveIBI)
   {
+    if(!burstDetector)
+    {
+        std::cerr << "Error! burst_detector is required for adaptive_IBI." << std::endl;
+        exit(1);
+    }
     assignConfigValue("protocols.adaptive_IBI.adaptation_time", adaptiveIBItotalTime);
     assignConfigValue("protocols.adaptive_IBI.target_IBI", adaptiveIBItarget);
     assignConfigValue("protocols.adaptive_IBI.accuracy", adaptiveIBIaccuracy);
@@ -406,9 +412,41 @@ void NetDyn::loadConfigFile(std::string filename, int param)
     assignConfigValue("protocols.adaptive_IBI.max_iterations", adaptiveIBImaxIterations);
   }
 
+  assignConfigValue("protocols.burst_transition_exploration.active", burstTransitionExploration, false);
+  if (burstTransitionExploration)
+  {
+    if(!burstDetector)
+    {
+      std::cerr << "Error! burst_detector is required for burst_transition_exploration." << std::endl;
+      exit(1);
+    }
+    assignConfigValue("protocols.burst_transition_exploration.delta", burstTransitionExplorationDelta);
+    assignConfigValue("protocols.burst_transition_exploration.delta_type", tmpStr);
+    if (tmpStr.find("LIN") != std::string::npos)
+    {
+      burstTransitionExplorationDeltaType = LIN;
+    }
+    else if (tmpStr.find("LOG") != std::string::npos)
+    {
+      burstTransitionExplorationDeltaType = LOG;
+    }
+    else
+    {
+        std::cerr << "Unrecognized delta_type. Only (LIN|LOG) are allowed." << "\n";
+        exit(1);
+    }
+    assignConfigValue("protocols.burst_transition_exploration.required_bursts", burstTransitionExplorationRequiredBursts);
+    assignConfigValue("protocols.burst_transition_exploration.maximum_IBI", burstTransitionExplorationMaximumIBI);
+  }
+  if(adaptiveIBI && burstTransitionExploration)
+  {
+    std::cerr << "Error! adaptive_IBI and burst_transition_exploration are incompatible." << std::endl;
+    exit(1);
+  }
+
   // Initialize the rest
   seedRng();
-  if (parallel)
+  if(parallel)
   {
     omp_set_num_threads(omp_get_max_threads());
     std::cout << "Number of available threads: " << omp_get_max_threads() << "\n";
@@ -417,6 +455,8 @@ void NetDyn::loadConfigFile(std::string filename, int param)
     for (int i = 0; i < omp_get_max_threads(); i++)
       parallelThreadUsage[i] = 0;
   }
+  else
+    omp_set_num_threads(1);
 
   // Initialize variables
   initialize();
@@ -448,11 +488,11 @@ bool NetDyn::assignConfigValue(const char* entry, T& configVariable, bool critic
   {
     if (critical)
     {
-      std::cout << "Critical Error! " << entry << " not defined in config file.\n";
+      std::cerr << "Critical Error! " << entry << " not defined in config file.\n";
       exit(1);
     }
     else
-      std::cout << "Warning! " << entry << " not defined in config file.\n";
+      std::cerr << "Warning! " << entry << " not defined in config file.\n";
     return false;
   }
   else
@@ -465,8 +505,8 @@ void NetDyn::setExternalConnections(std::string filename)
   inputFile.open(filename.c_str(), std::ifstream::in);
   if (!inputFile.is_open())
   {
-    std::cout << "There was an error opening the file " << filename << "\n";
-    return;
+    std::cerr << "There was an error opening the file " << filename << "\n";
+    exit(1);
   }
   std::string line;
   int nnum, econs;
@@ -583,11 +623,11 @@ void NetDyn::initialize()
     burstDetectorPossibleBurst = false;
     burstDetectorStepsPerBin = floor(burstDetectorBinSize / dt);
     if (fmod(burstDetectorBinSize / dt, 1.0) != 0)
-      std::cout << "Warning! BinSize is not a multiple of dt\n";
+      std::cerr << "Warning! BinSize is not a multiple of dt\n";
     burstDetectorMemory = new circularVector(burstDetectorBinNumber);
     //burstDetectorStorage = new std::vector<double>;
     burstDetectorStorage.clear();
-    initSaveResults("% Storing burst times (in ms)\n", burstDetectorSavedFileName);
+    initSaveResults("% Storing burst times (in s)\n", burstDetectorFile);
   }
 
   if (adaptiveIBI)
@@ -601,6 +641,14 @@ void NetDyn::initialize()
     adaptiveIBIrunner->setLowerBound(adaptiveIBIweightLowerBound);
     adaptiveIBIrunner->setUpperBound(adaptiveIBIweightUpperBound);
   }
+
+  if(burstTransitionExploration)
+  {
+    totalTime = 2.*burstTransitionExplorationMaximumIBI*burstTransitionExplorationRequiredBursts;
+    simulationSteps = ceil(totalTime / dt);
+    dryRun = true;
+  }
+
 }
 
 void NetDyn::saveNetworkStructure(std::string filename)
@@ -636,11 +684,10 @@ void NetDyn::saveNetworkStructure(std::string filename)
   saveResults(tmpStr.str(), filename);
 }
 
-int NetDyn::simulationStep()
+bool NetDyn::simulationStep()
 {
-  int i, j, k, neighIndex;
-  int ntype;
-  double vtmp, tmpMiniStrength, tmpMiniConstant;
+  bool returnValue;
+  returnValue = false;
 
   if (tracing)
     if (step % traceSamplingTime == 0)
@@ -649,7 +696,7 @@ int NetDyn::simulationStep()
   // Reset the mean depression in the terminals
   if (depression && depressionMini)
   {
-    for (i = 0; i < nNumber; i++)
+    for (int i = 0; i < nNumber; i++)
     {
       meanD_AMPA[i] = 0;
       meanD_GABA[i] = 0;
@@ -657,9 +704,9 @@ int NetDyn::simulationStep()
   }
 
   // Check for spikes
-  for (i = 0; i < nNumber; i++)
+  for (int i = 0; i < nNumber; i++)
   {
-    ntype = neuronType[i];
+    int ntype = neuronType[i];
     // If theres a spike, reset and propagate
     if (v[i] > V_p[ntype])
     {
@@ -667,12 +714,11 @@ int NetDyn::simulationStep()
       v[i] = c[ntype];
       u[i] += d[ntype];
       // Propagate currents to the neighbors;
-      k = connectivityFirstIndex[i];
+      int k = connectivityFirstIndex[i];
       //#pragma omp parallel for private(neighIndex) schedule(static, 100)
-      #pragma omp parallel for private(neighIndex)
-      for (j = 0; j < connectivityNumber[i]; j++)
+      for (int j = 0; j < connectivityNumber[i]; j++)
       {
-        neighIndex = connectivityMap[k + j];
+        int neighIndex = connectivityMap[k + j];
 
         if ((neurotransmitter[ntype] & NT_AMPA) && AMPA)
         {
@@ -705,10 +751,10 @@ int NetDyn::simulationStep()
     // Update the mean depression: assign to each neuron a mean depression of its input connections
     if (depression && depressionMini)
     {
-      k = connectivityFirstIndex[i];
-      for (j = 0; j < connectivityNumber[i]; j++)
+      int k = connectivityFirstIndex[i];
+      for (int j = 0; j < connectivityNumber[i]; j++)
       {
-        neighIndex = connectivityMap[k + j];
+        int neighIndex = connectivityMap[k + j];
 
         if ((neurotransmitter[ntype] & NT_AMPA) && AMPA)
           meanD_AMPA[neighIndex] += D[i];
@@ -717,10 +763,10 @@ int NetDyn::simulationStep()
       }
     }
   }
-  // Correctly assign the mean input depression
+  // Correctly assign the mean input depression  
   if (depression && depressionMini)
   {
-    for (i = 0; i < nNumber; i++)
+    for (int i = 0; i < nNumber; i++)
     {
       meanD_AMPA[i] = meanD_AMPA[i] / numberExcitatoryInputs[i];
       meanD_GABA[i] = meanD_GABA[i] / numberInhibitoryInputs[i];
@@ -730,10 +776,10 @@ int NetDyn::simulationStep()
 // if a spike happened in the previous loop, it means that it happened in between
 // the previous time step, so currents should be updated accordingly. And they are!
 // Also, we can update them in the same step
-  #pragma omp parallel for private(vtmp, ntype, tmpMiniStrength, tmpMiniConstant)
-  for (i = 0; i < nNumber; i++)
+  // Trying to split the loop for vectorization
+  #pragma omp parallel for
+  for (int i = 0; i < nNumber; i++)
   {
-    ntype = neuronType[i];
     if (parallel)
       parallelThreadUsage[omp_get_thread_num()]++;
     I[i] = 0;
@@ -749,6 +795,7 @@ int NetDyn::simulationStep()
     // MINIS HERE - only AMPA and GABA
     if (MINI)
     {
+      double tmpMiniConstant, tmpMiniStrength;
       if (AMPA)
       {
         if (multiplicativeMini)
@@ -796,7 +843,9 @@ int NetDyn::simulationStep()
         }
       }
     }
-
+  }
+  for (int i = 0; i < nNumber; i++)
+  {
     // Start to add all the currents
     if (WNOISE)
       I[i] += I_WNOISE[i];
@@ -815,9 +864,14 @@ int NetDyn::simulationStep()
       I[i] += I_GABA[i];
       I_GABA[i] *= exp_GABA;
     }
+  }
+  for (int i = 0; i < nNumber; i++)
+  {
+    int ntype = neuronType[i];
     // Now it is time to update the soma - Euler for now
 
     // Update the membrane potential
+    double vtmp = 0.0;
     if (neuronalClass[ntype] & (NEU_RS | NEU_FS))
       vtmp = v[i] + dt / C[ntype] * (K[ntype] * (v[i] - V_r[ntype]) * (v[i] - V_t[ntype]) - u[i] + I[i]);
     // Here there's a dendtric compartment
@@ -837,9 +891,12 @@ int NetDyn::simulationStep()
         u[i] += dt * a[ntype] * (b[ntype] * (v[i] - V_r[ntype]) * (v[i] - V_r[ntype]) * (v[i] - V_r[ntype]) - u[i]);
     }
     v[i] = vtmp;
-
+  }
+  for (int i = 0; i < nNumber; i++)
+  {
     if (depression)
     {
+      int ntype = neuronType[i];
       if ((neurotransmitter[ntype] & NT_AMPA) && AMPA)
         D[i] += dt_over_tau_D_AMPA * (1. - D[i]);
       if ((neurotransmitter[ntype] & NT_GABA) && GABA)
@@ -848,20 +905,64 @@ int NetDyn::simulationStep()
   }
   // Finished iterating over neurons
 
+  // Now check for bursts
   if (burstDetector)
   {
     if (step > 1 & step % burstDetectorStepsPerBin == 0)
     {
+      // If true, there was a burst
       if(burstCheck())
       {
         std::stringstream tmpStr;
         tmpStr.precision(15);
-        tmpStr << burstDetectorStorage.back() << "\n";
-        saveResults(tmpStr.str(), burstDetectorSavedFileName);
+
+        if(burstTransitionExploration)
+        {
+          // Store synaptic strength and burst time
+          tmpStr << g_AMPA << " " << burstDetectorStorage.back() << "\n";
+          saveResults(tmpStr.str(), burstDetectorFile);
+
+          // Check if we had enough bursts
+          int numBursts = burstDetectorStorage.size();
+          if(numBursts >= burstTransitionExplorationRequiredBursts)
+          {
+            // Check for end condition
+            double meanIBI = (burstDetectorStorage.at(numBursts - 1) - burstDetectorStorage.at(1)) / (double(numBursts) - 2.0);
+            if(meanIBI >= burstTransitionExplorationMaximumIBI)
+            {
+              returnValue = true;
+            }
+            // Else proceed to next strength
+            else
+            {
+              if(burstTransitionExplorationDeltaType == LIN)
+              {
+                g_AMPA += burstTransitionExplorationDelta;
+              }
+              else if(burstTransitionExplorationDeltaType == LOG)
+              {
+                g_AMPA = pow(10.0,log10(g_AMPA)+burstTransitionExplorationDelta);
+              }
+              std::cout << "Finished g iteration with an <IBI> of: " << meanIBI << ", new g_AMPA: " << g_AMPA << "\n\n";
+
+              // Reset the system
+              step = 0;
+              burstDetectorStorage.clear();
+              burstDetectorMemory->clear();
+            }
+          }
+        }
+        else
+        {
+          tmpStr << burstDetectorStorage.back() << "\n";
+          saveResults(tmpStr.str(), burstDetectorFile);
+        }
       }
       burstDetectorMemory->moveToNextBin();
     }
   }
+  if(returnValue)
+    return returnValue;
 
   // Move to the next step
   step++;
@@ -892,7 +993,6 @@ int NetDyn::simulationStep()
         dryRun = false;
         std::cout << "dryRun off. Storing spikes and/or traces\n";
         step = 0;
-        return 1;
       }
       else
       {
@@ -908,9 +1008,9 @@ int NetDyn::simulationStep()
   }
 
   if (step >= simulationSteps)
-    return 0;
-  else
-    return 1;
+    returnValue = true;
+
+  return returnValue;
 }
 
 void NetDyn::setConstants()
@@ -1027,8 +1127,8 @@ void NetDyn::initSaveResults(std::string tmpStr, std::string filename)
   std::ofstream savedFile(filename.c_str());
   if (!savedFile.is_open())
   {
-    std::cout << "There was an error opening file " << savedFileName;
-    return;
+    std::cerr << "There was an error opening file " << savedFileName;
+    exit(1);
   }
 
   // Logo - file will be used in MATLAB, so use % for non data lines
@@ -1049,8 +1149,8 @@ void NetDyn::saveResults(std::string tmpStr, std::string filename)
   std::ofstream savedFile(filename.c_str(), std::ios::app);
   if (!savedFile.is_open())
   {
-    std::cout << "There was an error opening the file " << savedFileName;
-    return;
+    std::cerr << "There was an error opening the file " << savedFileName;
+    exit(1);
   }
   savedFile << tmpStr;
   savedFile.close();
@@ -1062,8 +1162,8 @@ void NetDyn::configureSpikeRecord(int maxsize, std::string filename, double subs
   std::ofstream savedFile(filename.c_str(), std::ios::out);
   if (!savedFile.is_open())
   {
-    std::cout << "There was an error opening the file " << savedFileName;
-    return;
+    std::cerr << "There was an error opening the file " << savedFileName;
+    exit(1);
   }
   savedFile.close();
 
@@ -1081,8 +1181,8 @@ void NetDyn::configureSpikeRecord(int maxsize, std::string filename, double subs
   savedFile.open(dSpikesSubsetFile.c_str());
   if (!savedFile.is_open())
   {
-    std::cout << "There was an error opening the file " << savedFileName;
-    return;
+    std::cerr << "There was an error opening the file " << savedFileName;
+    exit(1);
   }
   savedFile.close();
   dSpikeNeuron = new int[dSpikeRecordLimit];

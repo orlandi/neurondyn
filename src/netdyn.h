@@ -38,6 +38,11 @@ enum neuronClass
   NEU_LS = 0x02,
   NEU_FS = 0x04
 };
+enum deltaType
+{
+    LIN = 0,
+    LOG = 1
+};
 
 #define STD_DATA_COUNT 1000000
 
@@ -65,12 +70,11 @@ class NetDyn
   int simulationStart();
   bool simulationRun();
   void loadNeuronType(std::string filename);
-
   inline bool simulationIsRunning() { return running; }
   inline bool simulationIsActive() { return active; }
   inline int getOriginalRngSeed() { return originalRngSeed; }
 
-  int simulationStep();
+  bool simulationStep();
 
   void simulationFinish();
 
@@ -140,12 +144,16 @@ class NetDyn
   int burstDetectorFirstStepAboveThreshold, burstDetectorLastStepAboveThreshold;
   double burstDetectorSpikeCount;
   bool burstDetectorPossibleBurst;
-  std::string burstDetectorSavedFileName;
-
-  // Burst detector variables
+  std::string burstDetectorFile;
+  // Burst detector internal variables
   circularVector* burstDetectorMemory;
   std::vector<double> burstDetectorStorage;
-  // Missing burst history variable
+
+  // Burst transition exploration parameters
+  bool burstTransitionExploration;
+  double burstTransitionExplorationDelta, burstTransitionExplorationMaximumIBI;
+  int burstTransitionExplorationRequiredBursts;
+  int burstTransitionExplorationDeltaType;
 
   // Burst adaptation parameters
   bool adaptiveIBI;

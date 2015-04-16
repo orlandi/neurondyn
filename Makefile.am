@@ -1,7 +1,7 @@
 #CXX = clang++
 CXX = g++-4.9
 AUTOMAKE_OPTIONS = subdir-objects
-ACLOCAL_AMFLAGS = ${ACLOCAL_FLAGS}
+ACLOCAL_AMFLAGS = ${ACLOCAL_FLAGS} -I m4
 LIBS = $(DEPS_LIBS)
 AM_CPPFLAGS = $(DEPS_CFLAGS)
 bin_PROGRAMS = neurondyn
@@ -10,4 +10,6 @@ neurondyn_SOURCES = src/adaptationrunner.cc src/adaptationrunner.h src/circularv
 neurondyn_LDADD = -lgsl -lgslcblas -lconfig++
 neurondyn_LDFLAGS = -fopenmp -L/Users/orlandi/projects/libconfig/lib
 neurondyn_CPPFLAGS = -I/Users/orlandi/projects/libconfig/include
-neurondyn_CPPFLAGS += -std=c++11 -fopenmp
+neurondyn_CPPFLAGS += -std=c++11 -fopenmp 
+#neurondyn_CPPFLAGS += -std=c++11  -fopenmp -fopt-info-loop-optimized=loop.opt
+
