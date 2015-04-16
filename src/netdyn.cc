@@ -958,7 +958,8 @@ bool NetDyn::simulationStep()
           saveResults(tmpStr.str(), burstDetectorFile);
         }
       }
-      burstDetectorMemory->moveToNextBin();
+      if(step > 1)
+        burstDetectorMemory->moveToNextBin();
     }
   }
   if(returnValue)
@@ -1445,6 +1446,8 @@ bool NetDyn::burstCheck()
       // Reset burst variables
       burstDetectorSpikeCount = 0;
       burstDetectorPossibleBurst = false;
+      burstDetectorFirstStepAboveThreshold = 0;
+      burstDetectorLastStepAboveThreshold = 0;
     }
   }
   return burstFound;

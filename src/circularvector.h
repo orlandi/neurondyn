@@ -77,6 +77,11 @@ class circularVector
   void clear()
   {
     std::fill(vec.begin(), vec.end(), 0);
+    idx = 0;
+    sumX = 0.;
+    sumXsquared = 0.;
+    oldValue = 0.;
+    vectorFull = false;
   }
 
   private:
