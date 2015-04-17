@@ -27,7 +27,10 @@
 
 #include <cmath>
 #include <ctime>
+
+#ifdef OPENMP_ENABLED
 #include <omp.h>
+#endif
 
 NetDyn::NetDyn()
 {
@@ -40,7 +43,14 @@ NetDyn::NetDyn()
   running = false;
   active = false;
   tracing = false;
+#ifdef OPENMP_ENABLED
   parallel = false;
+  parallelRng = NULL;
+  parallelThreadUsage = NULL;
+#endif
+#ifdef CUDA_ENABLED
+  cuda = false;
+#endif
   presetTypes = false;
   burstDetector = false;
   adaptiveIBI = false;
@@ -55,6 +65,35 @@ NetDyn::NetDyn()
   simulationReturnValue = 0;
 
   resultsFolder = "data";
+}
+
+NetDyn::~NetDyn()
+{
+  gsl_rng_free(rng);
+
+#ifdef OPENMP_ENABLED
+  if(parallel)
+  {
+    for (int i = 0; i < omp_get_max_threads(); i++)
+    {
+      gsl_rng_free(parallelRng[i]);
+    }
+    gsl_rng_free(*parallelRng);
+  }
+#endif
+
+#ifdef CUDA_ENABLED
+  if(cuda)
+  {
+    CURAND_CALL_DEST(curandDestroyGenerator(cudaRng));
+    CUDA_CALL_DEST(cudaFree(devNormalRngData));
+    CUDA_CALL_DEST(cudaFree(devUniformRngData));
+    free(hostNormalRngData);
+    free(hostUniformRngData);
+  }
+#endif
+
+  // TODO: free everything else
 }
 
 void NetDyn::setConnectivity(std::string filename)
@@ -155,6 +194,7 @@ int NetDyn::simulationStart()
   std::cout << "Simulation finished!\n";
   tend = time(0);
   std::cout << "It took " << difftime(tend, tstart) << " second(s).\n";
+#ifdef OPENMP_ENABLED
   if (parallel)
   {
     std::cout << "Global thread usage: ";
@@ -162,6 +202,7 @@ int NetDyn::simulationStart()
       std::cout << parallelThreadUsage[i] << " ";
     std::cout << "\n";
   }
+#endif
   processSpikes(dSpikeRecord);
   if (tracing)
     processTraces(traceRecord);
@@ -244,7 +285,7 @@ void NetDyn::setPositions(std::string filename)
   }
 }
 
-void NetDyn::loadConfigFile(std::string filename, int param)
+void NetDyn::loadConfigFile(std::string filename)
 {
   int* nt;
   std::string ntString, tmpStr, lookupStr;
@@ -326,8 +367,16 @@ void NetDyn::loadConfigFile(std::string filename, int param)
   // Configure remaining parameters
   assignConfigValue("simulation.timestep", dt);
   assignConfigValue("simulation.totalTime", totalTime);
-  assignConfigValue("simulation.parallel", parallel);
-
+#ifdef OPENMP_ENABLED
+  assignConfigValue("simulation.openmp", parallel, false);
+#endif
+#ifdef CUDA_ENABLED
+  assignConfigValue("simulation.cuda", cuda, false);
+  if(cuda)
+  {
+    assignConfigValue("simulation.cuda_rng_chunk_size", cudaRngChunkSize);
+  }
+#endif
   // Configure soma
 
   assignConfigValue("neuron.soma.whitenoise.active", WNOISE, false);
@@ -446,6 +495,7 @@ void NetDyn::loadConfigFile(std::string filename, int param)
 
   // Initialize the rest
   seedRng();
+#ifdef OPENMP_ENABLED
   if(parallel)
   {
     omp_set_num_threads(omp_get_max_threads());
@@ -457,6 +507,7 @@ void NetDyn::loadConfigFile(std::string filename, int param)
   }
   else
     omp_set_num_threads(1);
+#endif
 
   // Initialize variables
   initialize();
@@ -777,20 +828,21 @@ bool NetDyn::simulationStep()
 // the previous time step, so currents should be updated accordingly. And they are!
 // Also, we can update them in the same step
   // Trying to split the loop for vectorization
+#ifdef OPENMP_ENABLED
   #pragma omp parallel for
+#endif
   for (int i = 0; i < nNumber; i++)
   {
+#ifdef OPENMP_ENABLED
     if (parallel)
       parallelThreadUsage[omp_get_thread_num()]++;
+#endif
     I[i] = 0;
 
     // Now add the noise
     if (WNOISE)
     {
-      if (parallel)
-        I_WNOISE[i] = strength_WNOISE * gsl_ran_gaussian_ziggurat(parallelRng[omp_get_thread_num()], 1.);
-      else
-        I_WNOISE[i] = strength_WNOISE * gsl_ran_gaussian_ziggurat(rng, 1.);
+      I_WNOISE[i] = strength_WNOISE * getNormalRng();
     }
     // MINIS HERE - only AMPA and GABA
     if (MINI)
@@ -808,16 +860,8 @@ bool NetDyn::simulationStep()
         else
           tmpMiniStrength = g_mAMPA;
 
-        if (parallel)
-        {
-          if (gsl_rng_uniform(parallelRng[omp_get_thread_num()]) < tmpMiniConstant)
+        if(getUniformRng() < tmpMiniConstant)
             I_AMPA[i] += tmpMiniStrength;
-        }
-        else
-        {
-          if (gsl_rng_uniform(rng) < tmpMiniConstant)
-            I_AMPA[i] += tmpMiniStrength;
-        }
       }
       if (GABA)
       {
@@ -831,16 +875,8 @@ bool NetDyn::simulationStep()
         else
           tmpMiniStrength = g_mGABA;
 
-        if (parallel)
-        {
-          if (gsl_rng_uniform(parallelRng[omp_get_thread_num()]) < tmpMiniConstant)
+        if(getUniformRng() < tmpMiniConstant)
             I_GABA[i] += tmpMiniStrength;
-        }
-        else
-        {
-          if (gsl_rng_uniform(rng) < tmpMiniConstant)
-            I_GABA[i] += tmpMiniStrength;
-        }
       }
     }
   }
@@ -1047,8 +1083,50 @@ bool NetDyn::seedRng()
   tmpStr << "% Date: " << tm->tm_mday << "/" << tm->tm_mon + 1 << "/" << tm->tm_year + 1900 << ", "
          << "Time: " << tm->tm_hour << ":" << tm->tm_min << ":" << tm->tm_sec << ", "
          << "RNG Seed: " << seed << "\n";
+
+#ifdef CUDA_ENABLED
+  tmpStr << "% CUDA enabled at compile time.\n";
+#else
+  tmpStr << "% CUDA not enabled at compile time.\n";
+#endif
+
+#ifdef OPENMP_ENABLED
+  tmpStr << "% OpenMP enabled at compile time.\n";
+#else
+  tmpStr << "% OpenMP not enabled at compile time.\n";
+#endif         
+
   std::cout << tmpStr.str();
 
+#ifdef CUDA_ENABLED
+  if(cuda)
+  {
+    // Create the RNG and allocate memory
+    /* Allocate n floats on host */
+    hostNormalRngData = (float*)calloc(cudaRngChunkSize, sizeof(float));
+    hostUniformRngData = (float*)calloc(cudaRngChunkSize, sizeof(float));
+    /* Allocate n floats on device */
+    CUDA_CALL(cudaMalloc((void**)&devNormalRngData, cudaRngChunkSize * sizeof(float)));
+    CUDA_CALL(cudaMalloc((void**)&devUniformRngData, cudaRngChunkSize * sizeof(float)));
+    /* Create pseudo-random number generator */
+    CURAND_CALL(curandCreateGenerator(&cudaRng, CURAND_RNG_PSEUDO_MTGP32));
+    /* Set seed */
+    CURAND_CALL(curandSetPseudoRandomGeneratorSeed(cudaRng, seed));
+
+    // Generate the first batch of rngs
+    /* Generate n floats on device sampled from a normal distribution */
+    CURAND_CALL(curandGenerateNormal(cudaRng, devNormalRngData, cudaRngChunkSize, 0.0, 1.0));
+    /* Copy device memory to host */
+    CUDA_CALL(cudaMemcpy(hostNormalRngData, devNormalRngData, cudaRngChunkSize * sizeof(float), cudaMemcpyDeviceToHost));
+    /* Generate n floats on device sampled from an uniform distribution */
+    CURAND_CALL(curandGenerateUniform(cudaRng, devUniformRngData, cudaRngChunkSize));
+    /* Copy device memory to host */
+    CUDA_CALL(cudaMemcpy(hostUniformRngData, devUniformRngData, cudaRngChunkSize * sizeof(float), cudaMemcpyDeviceToHost));
+    // Initialize the RNG index
+    nextNormalRngIndex = 0;
+    nextUniformRngIndex = 0;
+  }
+#endif
   // EEW
   char newPath[FILENAME_MAX];
   char seedChar[FILENAME_MAX];
@@ -1105,6 +1183,75 @@ bool NetDyn::seedRng()
   return true;
 }
 
+// Wrapper to allow CUDA and GSL RNGs using the same implementation
+double NetDyn::getNormalRng()
+{
+  double returnValue;
+
+#ifdef CUDA_ENABLED
+  if(cuda)
+  {
+    returnValue = hostNormalRngData[nextNormalRngIndex];
+    nextNormalRngIndex++;
+    // If we have reached the last available RNG, generate a new chunk
+    if(nextNormalRngIndex == cudaRngChunkSize)
+    {
+      //std::cout << "Reached end of RNG chunk. Creating next one at step: " << step << "\n";
+      /* Generate n floats on device sampled from a normal distribution */
+      CURAND_CALL(curandGenerateNormal(cudaRng, devNormalRngData, cudaRngChunkSize, 0.0, 1.0));
+      /* Copy device memory to host */
+      CUDA_CALL(cudaMemcpy(hostNormalRngData, devNormalRngData, cudaRngChunkSize * sizeof(float), cudaMemcpyDeviceToHost));
+      nextNormalRngIndex = 0;
+    }
+  }
+  else
+#endif
+  {
+#ifdef OPENMP_ENABLED
+    if (parallel)
+      returnValue = gsl_ran_gaussian_ziggurat(parallelRng[omp_get_thread_num()], 1.);
+    else
+#endif
+      returnValue = gsl_ran_gaussian_ziggurat(rng, 1.);
+  }
+  return returnValue;
+}
+
+// Wrapper to allow CUDA and GSL RNGs using the same implementation
+double NetDyn::getUniformRng()
+{
+  double returnValue;
+
+#ifdef CUDA_ENABLED
+  if(cuda)
+  {
+    returnValue = hostUniformRngData[nextUniformRngIndex];
+    nextUniformRngIndex++;
+    // If we have reached the last available RNG, generate a new chunk
+    if(nextUniformRngIndex == cudaRngChunkSize)
+    {
+      //std::cout << "Reached end of RNG chunk. Creating next one at step: " << step << "\n";
+      /* Generate n floats on device sampled from a normal distribution */
+      CURAND_CALL(curandGenerateUniform(cudaRng, devUniformRngData, cudaRngChunkSize));
+      /* Copy device memory to host */
+      CUDA_CALL(cudaMemcpy(hostUniformRngData, devUniformRngData, cudaRngChunkSize * sizeof(float), cudaMemcpyDeviceToHost));
+      nextUniformRngIndex = 0;
+    }
+  }
+  else
+#endif
+  {
+#ifdef OPENMP_ENABLED
+    if (parallel)
+      returnValue = gsl_rng_uniform(parallelRng[omp_get_thread_num()]);
+    else
+#endif
+      returnValue = gsl_rng_uniform(rng);
+  }
+  return returnValue;
+}
+
+#ifdef OPENMP_ENABLED
 bool NetDyn::seedParallelRng(int seeds)
 {
   parallelRng = new gsl_rng* [seeds];
@@ -1113,6 +1260,7 @@ bool NetDyn::seedParallelRng(int seeds)
   for (int i = 0; i < seeds; i++)
   {
     parallelRng[i] = gsl_rng_alloc(gsl_rng_taus2);
+    // There's a reason for that constant (but I forgot)
     newseed = int(gsl_rng_uniform(rng) * 2147483647);
     std::cout << newseed << " ";
     gsl_rng_set(parallelRng[i], newseed);
@@ -1120,6 +1268,7 @@ bool NetDyn::seedParallelRng(int seeds)
   std::cout << "\n";
   return true;
 }
+#endif
 
 void NetDyn::initSaveResults(std::string tmpStr, std::string filename)
 {

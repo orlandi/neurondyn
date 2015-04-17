@@ -11,6 +11,29 @@ AC_PROG_LIBTOOL
 AM_INIT_AUTOMAKE
 AM_CONFIG_HEADER([config.h])
 
+# To enable CUDA
+AC_ARG_ENABLE([cuda],
+  AS_HELP_STRING([--enable-cuda],
+    [Enable CUDA (default=yes)]),
+    [enable_cuda=$enableval],
+    [enable_cuda=yes])
+if test "x$enable_cuda" = xyes; then
+  AC_DEFINE(CUDA_ENABLED, 1, [Enable CUDA])
+fi    
+AM_CONDITIONAL(CUDA_ENABLED,
+  [test "x$enable_cuda" = xyes])
+# To enable OPENMP
+AC_ARG_ENABLE([openmp],
+  AS_HELP_STRING([--enable-openmp],
+    [Enable OPENMP (default=yes)]),
+    [enable_openmp=$enableval],
+    [enable_openmp=yes])
+if test "x$enable_openmp" = xyes; then
+  AC_DEFINE(OPENMP_ENABLED, 1, [Enable OPENMP])
+fi    
+AM_CONDITIONAL(OPENMP_ENABLED,
+  [test "x$enable_openmp" = xyes])
+
 # Checks for programs
 AC_PROG_CXX
 AC_PROG_CC

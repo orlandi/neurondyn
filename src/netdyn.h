@@ -15,13 +15,33 @@
  */
 
 #pragma once
-
+#ifdef HAVE_CONFIG_H
+#include "../config.h"
+#endif
 #include "circularvector.h"
 #include "adaptationrunner.h"
 #include <libconfig.h++>
 #include "gsl/gsl_statistics.h"
 #include "gsl/gsl_rng.h"
 #include "gsl/gsl_randist.h"
+
+#ifdef CUDA_ENABLED
+#include <cuda.h> 
+#include <curand.h>
+#define CUDA_CALL(x) do { if((x)!=cudaSuccess) { \
+                          printf("Error at %s:%d\n",__FILE__,__LINE__);\
+                          return EXIT_FAILURE;}} while(0)
+#define CURAND_CALL(x) do { if((x)!=CURAND_STATUS_SUCCESS) { \
+                            printf("Error at %s:%d\n",__FILE__,__LINE__);\
+                            return EXIT_FAILURE;}} while(0)
+#define CUDA_CALL_DEST(x) do { if((x)!=cudaSuccess) { \
+                          printf("Error at %s:%d\n",__FILE__,__LINE__);\
+                          }} while(0)
+#define CURAND_CALL_DEST(x) do { if((x)!=CURAND_STATUS_SUCCESS) { \
+                            printf("Error at %s:%d\n",__FILE__,__LINE__);\
+                            }} while(0)
+#endif
+
 #include <math.h>
 #include <iostream>
 #include <vector>
@@ -50,13 +70,14 @@ class NetDyn
 {
   public:
   NetDyn();
+  ~NetDyn();
   void setConnectivity(std::string filename);
   void printConnectivityMap();
   void configureNeuron();
   void configureNeuronTypes(double* cs, double* ds, double* ps, int* ts, int num);
   void setDefaultNeuronTypes();
   void configureSimulation();
-  void loadConfigFile(std::string filename, int param = 0);
+  void loadConfigFile(std::string filename);
   template <typename T>
   bool assignConfigValue(const char* entry, T& configVariable, bool critical = true);
   void recordSpike(int i, int st);
@@ -66,7 +87,6 @@ class NetDyn
   void recordTraces();
   void processTraces(int size = -1);
   bool seedRng();
-  bool seedParallelRng(int seeds);
   int simulationStart();
   bool simulationRun();
   void loadNeuronType(std::string filename);
@@ -88,16 +108,32 @@ class NetDyn
 
   bool burstCheck();
 
-  // void updateAdaptiveIBI(int st);
-  // void calculateAdaptiveIBI();
+  double getNormalRng();
+  double getUniformRng();
+
+#ifdef OPENMP_ENABLED
+  bool seedParallelRng(int seeds);
+#endif
 
   private:
   std::string savedFileName, configFileName;
   gsl_rng* rng; // RNG structure
-  gsl_rng** parallelRng;
   libconfig::Config* configFile;
 
-  bool running, active, parallel, multiplicativeMini, depressionMini;
+#ifdef CUDA_ENABLED
+  bool cuda;
+  curandGenerator_t cudaRng;
+  float *devNormalRngData, *hostNormalRngData;
+  float *devUniformRngData, *hostUniformRngData;
+  size_t nextNormalRngIndex, nextUniformRngIndex, cudaRngChunkSize;
+#endif
+
+  bool running, active, multiplicativeMini, depressionMini;
+#ifdef OPENMP_ENABLED
+  bool parallel;
+  gsl_rng** parallelRng;
+  int* parallelThreadUsage;
+#endif
   double* miniStrength, *miniTime;
 
   int* connectivityMap;
@@ -131,8 +167,6 @@ class NetDyn
   int* tracedNeuron, numberTraces, traceSamplingTime, traceRecord;
   double** traceV, **traceU, **traceI, **traceI_AMPA, **traceI_NMDA, **traceI_GABA;
   double** traceI_WNOISE, **traceD, *traceTime, **traceG_AMPA, **traceG_GABA;
-  int* parallelThreadUsage;
-
   char currentPath[FILENAME_MAX];
   int simulationReturnValue;
   int originalRngSeed;

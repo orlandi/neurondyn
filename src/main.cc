@@ -22,32 +22,30 @@
 #include <iostream>
 #include <sstream>
 #include <stdio.h>
- 
+
 int main(int argc, char* argv[])
 {
   static_assert(std::numeric_limits<float>::is_iec559, "IEEE 754 required");
   // Disable buffering
   setvbuf(stdout, NULL, _IOLBF, 0);
-  int i = 1;
   std::stringstream seedsUsed, configFile;
-  while (i > 0)
-  {
-    simulation = new NetDyn;
-    std::cout << "Running simulation " << i << "...\n";
-    if (argc > 1)
-    {
-      configFile << argv[1];
-      std::cout << "Loading Config File: " << configFile.str() << "\n";
-      simulation->loadConfigFile(configFile.str(), i);
-    }
-    else
-      simulation->loadConfigFile("config.cfg", i);
-    i = simulation->simulationStart();
-    seedsUsed << simulation->getOriginalRngSeed() << " ";
-    // Bah. Need to avoid the memory hogs
-    //        delete[] simulation;
-  }
-  std::cout << "List of simulation seeds:\n" << seedsUsed.str() << "\n";
 
+  simulation = new NetDyn;
+  std::cout << "Running simulation...\n";
+  if (argc > 1)
+  {
+    configFile << argv[1];
+    std::cout << "Loading Config File: " << configFile.str() << "\n";
+    simulation->loadConfigFile(configFile.str());
+  }
+  else
+    simulation->loadConfigFile("config.cfg");
+
+  simulation->simulationStart();
+  seedsUsed << simulation->getOriginalRngSeed() << " ";
+
+  std::cout << "List of simulation seeds:\n" << seedsUsed.str() << "\n";
+  
+  delete simulation;
   return 0;
 }

@@ -8,8 +8,15 @@ bin_PROGRAMS = neurondyn
 INCLUDEPATH = . src
 neurondyn_SOURCES = src/adaptationrunner.cc src/adaptationrunner.h src/circularvector.h src/main.cc src/main.h src/netdyn.cc src/netdyn.h
 neurondyn_LDADD = -lgsl -lgslcblas -lconfig++
-neurondyn_LDFLAGS = -fopenmp -L/Users/orlandi/projects/libconfig/lib
-neurondyn_CPPFLAGS = -I/Users/orlandi/projects/libconfig/include
-neurondyn_CPPFLAGS += -std=c++11 -fopenmp 
-#neurondyn_CPPFLAGS += -std=c++11  -fopenmp -fopt-info-loop-optimized=loop.opt
+neurondyn_LDFLAGS = -L/Users/orlandi/projects/libconfig/lib
+neurondyn_CPPFLAGS = -I/Users/orlandi/projects/libconfig/include -std=c++11
 
+if CUDA_ENABLED
+  neurondyn_LDADD += -lcurand -lcudart -lpthread -ldl -L/usr/local/cuda/lib64
+  neurondyn_CPPFLAGS += -I/usr/local/cuda/include
+endif
+
+if OPENMP_ENABLED
+  neurondyn_LDFLAGS += -fopenmp
+  neurondyn_CPPFLAGS += -fopenmp
+endif
