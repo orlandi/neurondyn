@@ -2,7 +2,7 @@
 
 Simulates neuronal culture dynamics using a modified Izhikevich model.
 
-A previous version of this code was used in the following paper, and its algorithmic details are xpalined in its supplementary information:
+A previous version of this code was used in the following paper, and its algorithmic details are explained in its supplementary information:
 [Noise focusing and the emergence of coherent activity in neuronal cultures](http://www.nature.com/nphys/journal/v9/n9/full/nphys2686.html)  
 Nature Physics **9**, 582–590 (2013)
 
