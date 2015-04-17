@@ -1,6 +1,6 @@
 AC_PREREQ(2.61)
 AC_INIT([neruondyn], [0.1], [javierorlandi@javierorlandi.com],
-        [neruondyntar], [http://www.javierorlandi.com/])
+        [neurondyntar], [http://www.javierorlandi.com/])
 AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_AUX_DIR(config)
 # Set this file to one that is in your directory

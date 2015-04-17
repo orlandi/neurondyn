@@ -45,7 +45,7 @@
 #define OPENMP_ENABLED 1
 
 /* Name of package */
-#define PACKAGE "neruondyntar"
+#define PACKAGE "neurondyntar"
 
 /* Define to the address where bug reports for this package should be sent. */
 #define PACKAGE_BUGREPORT "javierorlandi@javierorlandi.com"
@@ -57,7 +57,7 @@
 #define PACKAGE_STRING "neruondyn 0.1"
 
 /* Define to the one symbol short name of this package. */
-#define PACKAGE_TARNAME "neruondyntar"
+#define PACKAGE_TARNAME "neurondyntar"
 
 /* Define to the home page for this package. */
 #define PACKAGE_URL "http://www.javierorlandi.com/"
