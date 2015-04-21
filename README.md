@@ -33,8 +33,9 @@ We should be set, now let's clone this repository:
     cd ~
     git clone https://github.com/orlandi/neurondyn
 
-Now let's configure:
+Now let's run autogen configure:
 
+    ./autogen.sh
     ./configure
 
 OpenMP and CUDA are enabled by default, you can disable them by running:
