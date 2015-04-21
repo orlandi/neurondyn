@@ -78,7 +78,7 @@ NetDyn::~NetDyn()
     {
       gsl_rng_free(parallelRng[i]);
     }
-    gsl_rng_free(*parallelRng);
+    delete [] parallelRng;
   }
 #endif
 
@@ -828,9 +828,7 @@ bool NetDyn::simulationStep()
 // the previous time step, so currents should be updated accordingly. And they are!
 // Also, we can update them in the same step
   // Trying to split the loop for vectorization
-#ifdef OPENMP_ENABLED
-  #pragma omp parallel for
-#endif
+  #pragma omp parallel for if(parallel)
   for (int i = 0; i < nNumber; i++)
   {
 #ifdef OPENMP_ENABLED
