@@ -34,7 +34,6 @@ neurondyn.sublime*
 /install-sh
 /libtool
 /ltmain.sh
-/m4/*
 /missing
 /stamp-h?
 .deps/
@@ -48,7 +47,6 @@ neurondyn.sublime*
 /autom4te.cache/
 /config.*
 /configure
-/m4/
 /stamp-h?
 .deps/
 .dirstamp

@@ -5,7 +5,7 @@ AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_AUX_DIR(config)
 # Set this file to one that is in your directory
 AC_CONFIG_SRCDIR([src/main.cc])
-AC_PROG_LIBTOOL
+LT_INIT
 
 # Automake initialization
 AM_INIT_AUTOMAKE
