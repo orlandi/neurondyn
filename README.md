@@ -231,7 +231,7 @@ protocols:
         delta = -0.1; # Initial g variation. Initial g is defined in the AMPA section
         delta_type = "LOG"; # If the increment is performed in "lin" or "log" scale
         required_bursts = 100; # Number of bursts used to compute the mean IBI
-        maximum_IBI = 100e3; # in ms
+        maximum_IBI = 100; # in s
     };
 };
 ```
