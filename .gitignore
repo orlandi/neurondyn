@@ -34,7 +34,7 @@ neurondyn.sublime*
 /install-sh
 /libtool
 /ltmain.sh
-/m4/
+/m4/*
 /missing
 /stamp-h?
 .deps/
@@ -54,3 +54,5 @@ neurondyn.sublime*
 .dirstamp
 *.o
 *~
+configure.lineno
+
