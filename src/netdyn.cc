@@ -22,7 +22,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <fstream>
-#include <sstream>
 #include <limits>
 
 #include <cmath>
@@ -55,6 +54,8 @@ NetDyn::NetDyn()
   burstDetector = false;
   adaptiveIBI = false;
   burstTransitionExploration = false;
+  stimulation = false;
+  stimulationFineTransition = false;
   dryRun = false;
   WNOISE = false;
   AMPA = false;
@@ -63,7 +64,8 @@ NetDyn::NetDyn()
   MINI = false;
   depression = false;
   simulationReturnValue = 0;
-
+  algorithm = EULER;
+  tmpResults.str("");
   resultsFolder = "data";
 }
 
@@ -188,8 +190,15 @@ int NetDyn::simulationStart()
   tstart = time(0);
   bool done = false;
   while(!done)
-  { 
+  {
+    if(algorithm == EULER)
+    { 
       done = simulationStep();
+    }
+    else if(algorithm == QUORUM)
+    {
+      done = simulationStepQuorum();
+    }
   }
   std::cout << "Simulation finished!\n";
   tend = time(0);
@@ -377,6 +386,17 @@ void NetDyn::loadConfigFile(std::string filename)
     assignConfigValue("simulation.cuda_rng_chunk_size", cudaRngChunkSize);
   }
 #endif
+  assignConfigValue("simulation.algorithm", tmpStr);
+  if (tmpStr.find("Euler") != std::string::npos)
+    algorithm = EULER;
+  else if (tmpStr.find("Quorum") != std::string::npos)
+    algorithm = QUORUM;
+  else
+  {
+    algorithm = EULER;
+    std::cout << "Invalid algorithm selected: " << tmpStr << " Using Euler\n";
+  }
+
   // Configure soma
 
   assignConfigValue("neuron.soma.whitenoise.active", WNOISE, false);
@@ -412,6 +432,8 @@ void NetDyn::loadConfigFile(std::string filename)
     assignConfigValue("neuron.synapse.minis.g_AMPA", g_mAMPA);
     assignConfigValue("neuron.synapse.minis.g_GABA", g_mGABA);
     assignConfigValue("neuron.synapse.minis.tau", tau_MINI);
+    assignConfigValue("neuron.synapse.minis.tau_AMPA", tau_AMPA_MINI);
+    assignConfigValue("neuron.synapse.minis.tau_GABA", tau_GABA_MINI);
     assignConfigValue("neuron.synapse.minis.multiplicative", multiplicativeMini);
     assignConfigValue("neuron.synapse.minis.depression", depressionMini);
   }
@@ -461,6 +483,7 @@ void NetDyn::loadConfigFile(std::string filename)
     assignConfigValue("protocols.adaptive_IBI.max_iterations", adaptiveIBImaxIterations);
   }
 
+  // transition exploration
   assignConfigValue("protocols.burst_transition_exploration.active", burstTransitionExploration, false);
   if (burstTransitionExploration)
   {
@@ -481,15 +504,59 @@ void NetDyn::loadConfigFile(std::string filename)
     }
     else
     {
-        std::cerr << "Unrecognized delta_type. Only (LIN|LOG) are allowed." << "\n";
+        std::cerr << "Unrecognized delta_type. Only (LIN|LOG) allowed." << "\n";
         exit(1);
     }
     assignConfigValue("protocols.burst_transition_exploration.required_bursts", burstTransitionExplorationRequiredBursts);
     assignConfigValue("protocols.burst_transition_exploration.maximum_IBI", burstTransitionExplorationMaximumIBI);
   }
-  if(adaptiveIBI && burstTransitionExploration)
+
+  assignConfigValue("protocols.external_stimulation.active", stimulation, false);
+  if(stimulation)
   {
-    std::cerr << "Error! adaptive_IBI and burst_transition_exploration are incompatible." << std::endl;
+    assignConfigValue("protocols.external_stimulation.pulse_duration", stimulationPulseDuration);
+    assignConfigValue("protocols.external_stimulation.pulse_period", stimulationPulsePeriod);
+    assignConfigValue("protocols.external_stimulation.pulse_initial_amplitude", stimulationPulseInitialAmplitude);
+    assignConfigValue("protocols.external_stimulation.pulse_delta_amplitude", stimulationPulseDeltaAmplitude);
+    assignConfigValue("protocols.external_stimulation.pulse_final_amplitude", stimulationPulseFinalAmplitude);
+    assignConfigValue("protocols.external_stimulation.pulse_repetitions", stimulationPulseRepetitions);
+    assignConfigValue("protocols.external_stimulation.resistance_type", tmpStr);
+    if(tmpStr.find("Gaussian") != std::string::npos)
+    {
+      stimulationResistanceType = DISTRIBUTION_GAUSSIAN;
+    }
+    else
+    {
+      std::cerr << "Unrecognized resistance_type. Only (Gaussian) allowed." << "\n";
+      exit(1); 
+    }
+    assignConfigValue("protocols.external_stimulation.resistance_mean", stimulationResistanceMean);
+    assignConfigValue("protocols.external_stimulation.resistance_std", stimulationResistanceStd);
+    assignConfigValue("protocols.external_stimulation.inhibit_minis", stimulationInhibitMinis);
+    assignConfigValue("protocols.external_stimulation.speed_up", stimulationSpeedUp);
+    assignConfigValue("protocols.external_stimulation.file", stimulationFile);
+    assignConfigValue("protocols.external_stimulation.full_activation_threshold", stimulationFullActivationThreshold);
+    assignConfigValue("protocols.external_stimulation.fine_activation_threshold", stimulationFineActivationThreshold);
+
+    assignConfigValue("protocols.external_stimulation.fine_transition", stimulationFineTransition, false);
+    if(stimulationFineTransition)
+    {        
+      assignConfigValue("protocols.external_stimulation.fine_transition_delta_divider", stimulationFineTransitionDeltaDivider);
+      assignConfigValue("protocols.external_stimulation.fine_transition_repetitions_multiplier", stimulationFineTransitionRepetitionsMultiplier);
+    }
+    bool tmpBool = true;
+    assignConfigValue("protocols.external_stimulation.store_spikes", tmpBool, false);
+    if(!tmpBool)
+    {
+        dryRun = true;
+        std::cout << "store_spikes is off. Not storing spikes or traces.\n";
+    }
+  }
+
+  // Protocol incompatibilities
+  if(int(adaptiveIBI)+int(burstTransitionExploration)+int(stimulation) > 1)
+  {
+    std::cerr << "Error! Incopatible protocols detected." << std::endl;
     exit(1);
   }
 
@@ -597,6 +664,13 @@ void NetDyn::initialize()
   {
     I_WNOISE = new double[nNumber];
   }
+  if (MINI)
+  {
+    if (AMPA)
+      I_MINI_AMPA = new double[nNumber];
+    if (GABA)
+      I_MINI_GABA = new double[nNumber];
+  }
   if (depression)
   {
     D = new double[nNumber];
@@ -634,6 +708,13 @@ void NetDyn::initialize()
       I_NMDA[i] = 0.;
     if (WNOISE)
       I_WNOISE[i] = 0.;
+    if (MINI)
+    {
+      if (AMPA)
+        I_MINI_AMPA[i] = 0.;
+      if (GABA)
+        I_MINI_GABA[i] = 0.;
+    }
     D[i] = 1.;
   }
 
@@ -700,6 +781,54 @@ void NetDyn::initialize()
     dryRun = true;
   }
 
+  if(stimulation)
+  {
+    //totalTime = stimulationPulsePeriod*(stimulationPulseFinalAmplitude-stimulationPulseInitialAmplitude)/stimulationPulseDeltaAmplitude*stimulationPulseRepetitions*2.;
+    //simulationSteps = ceil(totalTime / dt);
+    simulationSteps = std::numeric_limits<int>::max();
+    std::cout << "New total time:" << totalTime << "\n";
+
+    stimulationPulseCurrentRepetition = 0;
+    stimulationPulseCurrentAmplitude = stimulationPulseInitialAmplitude;
+    stimulationPulseDurationSteps = floor(stimulationPulseDuration / dt);
+    stimulationPulsePeriodSteps = floor(stimulationPulsePeriod / dt);
+
+    // Generate the list of resistances
+    stimulationR = new double[nNumber];
+    for(int i = 0; i < nNumber; i++)
+    {
+      if(stimulationResistanceType == DISTRIBUTION_GAUSSIAN)
+      {
+        stimulationR[i] = gsl_ran_gaussian_ziggurat(rng, stimulationResistanceStd)+stimulationResistanceMean;
+      }
+    }
+    if(stimulationInhibitMinis)
+    {
+      MINI = false;
+    }
+
+    initSaveResults("% External stimulation protocol\n"
+                    "% (V, # iteration, # spikes, active fraction)\n", stimulationFile);
+
+    // The counter to store the number of spikes per neuron on each iteration
+    stimulationActiveNeuronCount = new double[nNumber];
+    for(int i = 0; i < nNumber; i++)
+    {
+            stimulationActiveNeuronCount[i] = 0;
+    }
+
+    // True by default, we set it to false at any iteration that does not reach it
+    if(stimulationSpeedUp)
+    {
+       stimulationFullActivationReached = true;
+    }
+
+    // False by default
+    if(stimulationFineTransition)
+    {
+        stimulationFineTransitionReached = false;
+    }
+  }
 }
 
 void NetDyn::saveNetworkStructure(std::string filename)
@@ -859,7 +988,7 @@ bool NetDyn::simulationStep()
           tmpMiniStrength = g_mAMPA;
 
         if(getUniformRng() < tmpMiniConstant)
-            I_AMPA[i] += tmpMiniStrength;
+            I_MINI_AMPA[i] += tmpMiniStrength;
       }
       if (GABA)
       {
@@ -874,7 +1003,7 @@ bool NetDyn::simulationStep()
           tmpMiniStrength = g_mGABA;
 
         if(getUniformRng() < tmpMiniConstant)
-            I_GABA[i] += tmpMiniStrength;
+            I_MINI_GABA[i] += tmpMiniStrength;
       }
     }
   }
@@ -898,7 +1027,135 @@ bool NetDyn::simulationStep()
       I[i] += I_GABA[i];
       I_GABA[i] *= exp_GABA;
     }
+    if (MINI)
+    {
+      if (AMPA)
+      {
+        I[i] += I_MINI_AMPA[i];
+        I_MINI_AMPA[i] *= exp_AMPA_MINI;
+      }
+      if (GABA)
+      {
+        I[i] += I_MINI_GABA[i];
+        I_MINI_GABA[i] *= exp_GABA_MINI;
+      }
+    }
   }
+
+  // Check the stimulation protocol to add the currents if needed
+  if(stimulation)
+  {
+    // Starting a pulse (always skip the one at t=0)
+    if (step > 1 &
+        step % stimulationPulsePeriodSteps == 0)
+    {
+      // Generate a new list of resistances
+      delete []stimulationR;
+      stimulationR = new double[nNumber];
+      for(int i = 0; i < nNumber; i++)
+      {
+        if(stimulationResistanceType == DISTRIBUTION_GAUSSIAN)
+        {
+          stimulationR[i] = gsl_ran_gaussian_ziggurat(rng, stimulationResistanceStd)+stimulationResistanceMean;
+        }
+      }
+
+      // Check activation from the last iteration and store them (but skip the first of all the iterations)
+      if(stimulationPulseCurrentRepetition > 0 || stimulationPulseCurrentAmplitude > stimulationPulseInitialAmplitude)
+      {
+          std::stringstream tmpStr;
+          int activeNeurons = 0;
+          int spikeCount = 0;
+          double activeFraction;
+          for(int i = 0; i < nNumber; i++)
+          {
+            // Add if different from 0
+            activeNeurons += !!stimulationActiveNeuronCount[i];
+            spikeCount += stimulationActiveNeuronCount[i];
+            // Reset the counter
+            stimulationActiveNeuronCount[i] = 0;
+          }
+          activeFraction = double(activeNeurons)/double(nNumber);
+          tmpStr.precision(10);
+          tmpStr << stimulationPulseCurrentAmplitude << " " << stimulationPulseCurrentRepetition << " "
+                 <<  spikeCount << " " << activeFraction << "\n";
+          //std::cout << "Last pulse: " << tmpStr.str();
+          if(stimulationSpeedUp && activeFraction < stimulationFullActivationThreshold)
+          {
+            stimulationFullActivationReached = false;
+          }
+          // If it is the first time we reach full activation, activate the fine transition mode
+          if(stimulationFineTransition && activeFraction >= stimulationFineActivationThreshold && !stimulationFineTransitionReached)
+          {
+            std::cout << "Fine transition condition reached!\n";
+            stimulationFineTransitionReached = true;
+            // Go back one delta
+            stimulationPulseCurrentAmplitude -= stimulationPulseDeltaAmplitude;
+            stimulationPulseDeltaAmplitude /= stimulationFineTransitionDeltaDivider;
+            stimulationPulseRepetitions *= stimulationFineTransitionRepetitionsMultiplier;
+            // Set repetitions to 0 and add the new delta
+            stimulationPulseCurrentRepetition = 0;
+            stimulationPulseCurrentAmplitude += stimulationPulseDeltaAmplitude;
+          }
+          saveResults(tmpStr.str(), stimulationFile);
+      }
+      // Add the repetition count
+      stimulationPulseCurrentRepetition++;
+
+      // If we finished the repetitions, add delta amplitude
+      if(stimulationPulseCurrentRepetition > stimulationPulseRepetitions)
+      {
+        stimulationPulseCurrentAmplitude += stimulationPulseDeltaAmplitude;
+        stimulationPulseCurrentRepetition = 1;
+        // Set the full activation to true (this is set to false for any repetition 
+        // that does not reach full activation) and never touched. So if it remains true
+        // at the end we can finish the run
+        if(stimulationSpeedUp)
+        {
+            if(stimulationFullActivationReached)
+            {
+                // quit
+                returnValue = true;
+                return returnValue;
+            }
+            else
+            {
+                stimulationFullActivationReached = true;
+            }
+        }
+      }
+      // Finishing condition
+      if(stimulationPulseCurrentAmplitude > stimulationPulseFinalAmplitude)
+      {
+        returnValue = true;
+        return returnValue;
+      }
+      //std::cout << "Starting a pulse at step: " << step << " time: " << step*dt*1e-3 << " s A: " << 
+      //     stimulationPulseCurrentAmplitude << " rep: " << stimulationPulseCurrentRepetition << "\n";
+    }
+    // First half of the pulse
+    if (step > 2*stimulationPulseDurationSteps & 
+        step % stimulationPulsePeriodSteps <= stimulationPulseDurationSteps)
+    {
+      for(int i = 0; i < nNumber; i++)
+      {
+        I[i] += stimulationPulseCurrentAmplitude/stimulationR[i];
+      }
+    }
+    // Second half of the pulse
+    else if(step > 2*stimulationPulseDurationSteps &
+            step % stimulationPulsePeriodSteps > stimulationPulseDurationSteps & 
+            step % stimulationPulsePeriodSteps <= 2*stimulationPulseDurationSteps)
+    {
+      for(int i = 0; i < nNumber; i++)
+      {
+        I[i] -= stimulationPulseCurrentAmplitude/stimulationR[i];
+      }
+    }
+
+  }
+
+  // Loop to update the membrane potential
   for (int i = 0; i < nNumber; i++)
   {
     int ntype = neuronType[i];
@@ -926,6 +1183,8 @@ bool NetDyn::simulationStep()
     }
     v[i] = vtmp;
   }
+
+  // Loop to update depression
   for (int i = 0; i < nNumber; i++)
   {
     if (depression)
@@ -948,7 +1207,7 @@ bool NetDyn::simulationStep()
       if(burstCheck())
       {
         std::stringstream tmpStr;
-        tmpStr.precision(15);
+        tmpStr.precision(10);
 
         if(burstTransitionExploration)
         {
@@ -1025,6 +1284,8 @@ bool NetDyn::simulationStep()
       {
         std::cout << "Obtained desired IBI at g_AMPA: " << g_AMPA << " . Continuing with the simulation.\n";
         adaptiveIBI = false;
+        // Done to empty the vector before the dryrun
+        processSpikes(dSpikeRecord);
         dryRun = false;
         std::cout << "dryRun off. Storing spikes and/or traces\n";
         step = 0;
@@ -1063,6 +1324,13 @@ void NetDyn::setConstants()
   }
   if (WNOISE)
     strength_WNOISE = sqrt(2. * g_WNOISE / dt);
+  if (MINI)
+  {
+    if (AMPA)
+      exp_AMPA_MINI = exp(-dt / tau_AMPA_MINI);
+    if (GABA)
+      exp_GABA_MINI = exp(-dt / tau_GABA_MINI);
+  }
 }
 
 bool NetDyn::seedRng()
@@ -1351,6 +1619,10 @@ void NetDyn::recordSpike(int i, int st)
   {
     processSpikes();
   }
+  if(stimulation)
+  {
+    stimulationActiveNeuronCount[i]++;
+  }
 }
 
 void NetDyn::processSpikes(int size)
@@ -1358,8 +1630,8 @@ void NetDyn::processSpikes(int size)
   if (size == -1)
     size = dSpikeRecordLimit;
   std::stringstream tmpStr, tmpStrSubset;
-  tmpStr.precision(15);
-  tmpStrSubset.precision(15);
+  tmpStr.precision(10);
+  tmpStrSubset.precision(10);
   for (int i = 0; i < size; i++)
   {
     tmpStr << dSpikeNeuron[i] << " " << dSpikeStep[i] * dt << "\n";
@@ -1415,7 +1687,7 @@ void NetDyn::processTraces(int size)
   if (size == -1)
     size = STD_DATA_COUNT;
   std::stringstream tmpStr, completefile;
-  tmpStr.precision(15);
+  tmpStr.precision(10);
   for (int i = 0; i < numberTraces; i++)
   {
     tmpStr.clear();
@@ -1598,4 +1870,164 @@ bool NetDyn::burstCheck()
     }
   }
   return burstFound;
+}
+
+
+
+bool NetDyn::simulationStepQuorum()
+{
+  bool returnValue = false;
+
+  // Check the stimulation protocol to add the currents if needed
+  if(stimulation)
+  {
+    // Generate a new list of resistances
+    delete []stimulationR;
+    stimulationR = new double[nNumber];
+    for(int i = 0; i < nNumber; i++)
+    {
+        if(stimulationResistanceType == DISTRIBUTION_GAUSSIAN)
+        {
+            stimulationR[i] = gsl_ran_gaussian_ziggurat(rng, stimulationResistanceStd)+stimulationResistanceMean;
+        }
+    }
+
+    // Check activation from the last iteration and store them (but skip the first of all the iterations)
+    if(stimulationPulseCurrentRepetition > 0 || stimulationPulseCurrentAmplitude > stimulationPulseInitialAmplitude)
+    {
+      std::stringstream tmpStr;
+      int activeNeurons = 0;
+      int spikeCount = 0;
+      double activeFraction;
+      for(int i = 0; i < nNumber; i++)
+      {
+        // Add if different from 0
+        activeNeurons += !!stimulationActiveNeuronCount[i];
+        spikeCount += stimulationActiveNeuronCount[i];
+        // Reset the counter
+        stimulationActiveNeuronCount[i] = 0;
+      }
+      activeFraction = double(activeNeurons)/double(nNumber);
+      tmpStr.precision(10);
+      tmpStr << stimulationPulseCurrentAmplitude << " " << stimulationPulseCurrentRepetition << " "
+             <<  spikeCount << " " << activeFraction << "\n";
+      //std::cout << "Last pulse: " << tmpStr.str();
+      tmpResults << tmpStr.str();
+      if(stimulationSpeedUp && activeFraction < stimulationFullActivationThreshold)
+      {
+        stimulationFullActivationReached = false;
+      }
+      // If it is the first time we reach full activation, activate the fine transition mode
+      if(stimulationFineTransition && activeFraction >= stimulationFineActivationThreshold && !stimulationFineTransitionReached)
+      {
+        std::cout << "Fine transition condition reached!\n";
+        stimulationFineTransitionReached = true;
+        // Go back one delta
+        stimulationPulseCurrentAmplitude -= stimulationPulseDeltaAmplitude;
+        stimulationPulseDeltaAmplitude /= stimulationFineTransitionDeltaDivider;
+        stimulationPulseRepetitions *= stimulationFineTransitionRepetitionsMultiplier;
+        // Set repetitions to 0 and add the new delta
+        stimulationPulseCurrentRepetition = 0;
+        stimulationPulseCurrentAmplitude += stimulationPulseDeltaAmplitude;
+
+        saveResults(tmpResults.str(), stimulationFile);
+        tmpResults.str("");
+      }
+    }
+    // Add the repetition count
+    stimulationPulseCurrentRepetition++;
+
+    // If we finished the repetitions, add delta amplitude
+    if(stimulationPulseCurrentRepetition > stimulationPulseRepetitions)
+    {
+        // Save results
+        saveResults(tmpResults.str(), stimulationFile);
+        tmpResults.str("");
+        stimulationPulseCurrentAmplitude += stimulationPulseDeltaAmplitude;
+        stimulationPulseCurrentRepetition = 1;
+        // Set the full activation to true (this is set to false for any repetition 
+        // that does not reach full activation) and never touched. So if it remains true
+        // at the end we can finish the run
+        if(stimulationSpeedUp)
+        {
+            if(stimulationFullActivationReached)
+            {
+                // quit
+                returnValue = true;
+                return returnValue;
+            }
+            else
+            {
+                stimulationFullActivationReached = true;
+            }
+        }
+    }
+    // Finishing condition
+    if(stimulationPulseCurrentAmplitude > stimulationPulseFinalAmplitude)
+    {
+        returnValue = true;
+        return returnValue;
+    }
+
+    // Activate manually the required fraction
+    for (int i = 0; i < nNumber; i++)
+    {
+      if(stimulationR[i] <= stimulationPulseCurrentAmplitude)
+      {
+        v[i] = 1.;
+        recordSpike(i, step);
+      }
+      else
+      {
+        v[i] = 0.;
+      }
+    }
+  }
+  int *activeInputs;
+  activeInputs = new int[nNumber];
+  
+  // Do the quorum iteration
+  bool done = false;
+  while(!done)
+  {
+    step++;
+    done = true;
+    for (int i = 0; i < nNumber; i++)
+    {
+      activeInputs[i] = 0;
+    }
+    // Propagate the inputs
+    for (int i = 0; i < nNumber; i++)
+    {
+      if (v[i] >= 1)
+      {
+        // Propagate currents to the neighbors;
+        int k = connectivityFirstIndex[i];
+        //#pragma omp parallel for private(neighIndex) schedule(static, 100)
+        for (int j = 0; j < connectivityNumber[i]; j++)
+        {
+          int neighIndex = connectivityMap[k + j];
+
+          activeInputs[neighIndex]++;
+        }
+      }
+    }
+    // Now check for new spikes    
+    for (int i = 0; i < nNumber; i++)
+    {
+      if(activeInputs[i] >= g_AMPA && v[i] <= 0)
+      {
+        v[i] = 1;
+        // Now store the spike
+        recordSpike(i, step);
+        totalSpikes++;
+        done = false;
+      }
+    }
+
+  }
+  delete []activeInputs;
+  step++;
+
+  return returnValue;
 }

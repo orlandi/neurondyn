@@ -24,6 +24,7 @@
 #include "gsl/gsl_statistics.h"
 #include "gsl/gsl_rng.h"
 #include "gsl/gsl_randist.h"
+#include <sstream>
 
 #ifdef CUDA_ENABLED
 #include <cuda.h> 
@@ -60,8 +61,19 @@ enum neuronClass
 };
 enum deltaType
 {
-    LIN = 0,
-    LOG = 1
+  LIN = 0,
+  LOG = 1
+};
+enum algorithmType
+{
+    EULER = 0,
+    QUORUM = 1
+};
+
+
+enum distribution
+{
+  DISTRIBUTION_DELTA, DISTRIBUTION_RAYLEIGH, DISTRIBUTION_UNIFORM, DISTRIBUTION_GAUSSIAN
 };
 
 #define STD_DATA_COUNT 1000000
@@ -95,6 +107,7 @@ class NetDyn
   inline int getOriginalRngSeed() { return originalRngSeed; }
 
   bool simulationStep();
+  bool simulationStepQuorum();
 
   void simulationFinish();
 
@@ -117,6 +130,7 @@ class NetDyn
 
   private:
   std::string savedFileName, configFileName;
+  std::stringstream tmpResults;
   gsl_rng* rng; // RNG structure
   libconfig::Config* configFile;
 
@@ -145,12 +159,14 @@ class NetDyn
   // Neuron variables
   double* C, *K, *V_r, *V_t, *V_p, *a, *b, *p;
   double* v, *u, *I, *I_GABA, *I_AMPA, *I_NMDA, *I_WNOISE, *c, *d, *D, *meanD_AMPA, *meanD_GABA, *v_d;
+  double* I_MINI_AMPA, *I_MINI_GABA;
   double* positionX, *positionY;
   int* neurotransmitter, *neuronalClass;
   int* ntTypes, *neuronType, neuronTypes;
   double g_AMPA, g_NMDA, g_GABA, g_mAMPA, g_mGABA, g_WNOISE;
   double tau_NMDA, tau_AMPA, tau_GABA, tau_D_AMPA, tau_D_GABA, beta_AMPA, beta_GABA, tau_MINI;
-  int totalSpikes;
+  double tau_AMPA_MINI, tau_GABA_MINI;
+  int totalSpikes, algorithm;
 
   // Simulation parameters
   double dt, t, totalTime;
@@ -159,6 +175,7 @@ class NetDyn
   bool GABA, NMDA, AMPA, MINI, WNOISE, depression;
 
   double exp_AMPA, exp_NMDA, exp_GABA, dt_times_a, dt_over_tau_D_AMPA, dt_over_tau_D_GABA, dt_over_C, strength_WNOISE;
+  double exp_AMPA_MINI, exp_GABA_MINI;
   // Post processing
   int* dSpikeNeuron, dSpikeRecord, dSpikeRecordLimit, *dSpikeStep, dSpikeSubsetSize;
   std::string dSpikesFile, traceFile, dSpikesSubsetFile;
@@ -199,6 +216,27 @@ class NetDyn
   adaptationRunner* adaptiveIBIrunner;
   int adaptiveIBIcurrentIteration, adaptiveIBItotalTimeSteps;
   bool adaptiveIBIfinished;
+
+  // External stimulation parameters
+  bool stimulation;
+  double stimulationPulseDuration, stimulationPulsePeriod, stimulationPulseInitialAmplitude;
+  double stimulationPulseDeltaAmplitude, stimulationPulseFinalAmplitude;
+  int stimulationPulseRepetitions;
+  int stimulationResistanceType;
+  double stimulationResistanceMean, stimulationResistanceStd;
+  bool stimulationInhibitMinis, stimulationSpeedUp, stimulationFineTransition;
+  double stimulationFineTransitionDeltaDivider, stimulationFineTransitionRepetitionsMultiplier;
+  double stimulationFullActivationThreshold, stimulationFineActivationThreshold;
+  std::string stimulationFile;
+
+  // External stimulation internal variables
+  double stimulationPulseCurrentRepetition, stimulationPulseCurrentAmplitude;
+  double *stimulationR;
+  int stimulationPulseDurationSteps, stimulationPulsePeriodSteps;
+  double *stimulationActiveNeuronCount;
+  bool stimulationFullActivationReached, stimulationFineTransitionReached;
+  
+  // Each protocol should be its own class with its own functions...
 
   bool dryRun;
 };
