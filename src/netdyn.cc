@@ -1403,7 +1403,7 @@ bool NetDyn::seedRng()
   strcpy(newPath, resultsFolder.c_str());
   strcat(newPath, "/");
   strcat(newPath, seedChar);
-  strcpy(tmpChar, "mkdir ");
+  strcpy(tmpChar, "mkdir -p ");
   strcat(tmpChar, newPath);
   if (system(tmpChar) == -1)
   {
